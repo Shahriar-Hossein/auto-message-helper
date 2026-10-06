@@ -19,6 +19,26 @@
   }
   try {
     await wait();
+    check("selection is required before Start or Generate", () => {
+      assert($("start").disabled && $("generate").disabled, "Unselected chat actions enabled");
+    });
+    const title = document.querySelector("h1");
+    title.dataset.tid = "actual-teams-title";
+    await click("select");
+    check("failed selection keeps the actual error and exposes page metadata", () => {
+      assert($("status").textContent.includes("Expected one chat title; found 0"), "Selection error was lost");
+      assert($("inspection").open && $("context").textContent.includes("actual-teams-title"), "Live title candidate not reported");
+      assert($("start").disabled && $("generate").disabled, "Failed selection enabled generation");
+      const report = $("context").textContent;
+      assert(!report.includes("Hi Alice") && !report.includes("Hello!") && !report.includes("chat-a"), "Page check leaked conversation data");
+    });
+    title.dataset.tid = "chat-header-title";
+    await click("diagnose");
+    check("page check lists selector counts and header/editor candidates", () => {
+      assert($("context").textContent.includes("header: 1 / 1"), "Selector count missing");
+      assert($("context").textContent.includes("Visible title/header candidates"), "Header candidates missing");
+      assert($("context").textContent.includes('contenteditable="true"'), "Editor metadata missing");
+    });
     check("loaded messages and sender labels", () => {
       const snap = TeamsReplyAdapter.snapshot(testState.config);
       assert(snap.messages.length === 2 && snap.messages[0].role === "me" && snap.messages[1].role === "other", "Incorrect sender labels");
@@ -73,7 +93,7 @@
     await click("pause");
     main.removeAttribute("data-chat-id"); await click("select"); await click("start");
     check("automatic mode blocks without stable chat ID", () => {
-      assert($("status").textContent.includes("requires a stable chat ID"), "Automatic mode accepted a display name identity");
+      assert($("status").textContent.includes("requires a stable conversation identity"), "Automatic mode accepted a display name identity");
       assert(!$("start").disabled, "Monitoring started without a chat ID");
     });
     main.dataset.chatId = "chat-a"; await click("select"); $("mode").value = "draft";
@@ -98,6 +118,66 @@
       assert(testState.sendCount === 2 && editor.innerText.includes("I want to edit this"), "User edit was sent or lost");
       assert($("status").textContent.includes("changed after insertion"), "User editing did not cancel automatic sending");
     });
+    title.dataset.tid = "actual-teams-title";
+    await click("select");
+    check("a failed reselection clears the previous target", () => {
+      assert($("selected").textContent === "No chat selected" && $("start").disabled && $("generate").disabled, "Old target survived failed reselection");
+    });
+    editor.textContent = "";
+    main.removeAttribute("data-chat-id");
+    title.dataset.tid = "chat-title";
+    const peer = document.createElement("span"); peer.dataset.tid = "participant-8:live:fixture-peer"; peer.textContent = "Alice";
+    const menu = document.createElement("ul"); menu.dataset.tid = "chat-topic-menu"; menu.append(peer);
+    const statusText = document.createElement("span"); statusText.textContent = " Extra header UI";
+    title.replaceChildren(menu, statusText);
+    function modernMessage(id, authorName, content) {
+      const item = document.createElement("div"); item.dataset.tid = "chat-pane-item";
+      const author = document.createElement("b"); author.dataset.tid = "message-author-name"; author.textContent = authorName;
+      const row = document.createElement("div"); row.dataset.tid = "chat-pane-message"; row.dataset.messageId = id; row.setAttribute("role", "group");
+      const body = document.createElement("div"); const p = document.createElement("p"); p.textContent = content; body.append(p);
+      const actions = document.createElement("button"); actions.dataset.tid = "message-actions-menu-hidden-button"; actions.textContent = "Message actions";
+      const reactions = document.createElement("div"); reactions.dataset.tid = "diverse-reaction-summary"; reactions.setAttribute("role", "toolbar"); reactions.textContent = "😀 3 reactions";
+      row.append(body, actions, reactions); item.append(author, row); return item;
+    }
+    list.replaceChildren(modernMessage("modern-1", "Me", "My recent message"), modernMessage("modern-2", "Alice", "Reply to this"));
+    list.scrollTop = list.scrollHeight;
+    const sendButton = document.querySelector('[data-tid="send-message"]'); sendButton.removeAttribute("data-tid");
+    const sendIcon = document.createElement("span"); sendIcon.dataset.tid = "sendMessageCommands-send"; sendIcon.textContent = "Send"; sendButton.replaceChildren(sendIcon);
+    testState.config = TeamsReplyCore.settings({ ...testState.config, selectors: { ...TeamsReplyCore.LEGACY_SELECTORS } });
+    await click("select");
+    check("reported Teams layout reads untagged bodies and sibling authors", () => {
+      const snap = TeamsReplyAdapter.snapshot(testState.config);
+      assert(snap.title === "Alice" && snap.messages[0].role === "me" && snap.messages[1].role === "other", "Modern chat title or authors not read");
+      assert(snap.messages[0].text === "My recent message" && snap.messages[1].text === "Reply to this", "Reaction/action text entered context");
+      assert(snap.chatId === "direct:8:live:fixture-peer", "Recipient identity not detected");
+      assert(!$("start").disabled && !$("generate").disabled, `Reported chat selection failed: ${$("status").textContent}`);
+    });
+    check("recipient identity distinguishes chats and rejects multiple participants", () => {
+      const original = TeamsReplyAdapter.snapshot(testState.config).identity;
+      peer.dataset.tid = "participant-8:live:another-peer";
+      assert(TeamsReplyAdapter.snapshot(testState.config).identity !== original, "Different recipient kept same identity");
+      peer.dataset.tid = "participant-8:live:fixture-peer";
+      const second = peer.cloneNode(true); second.dataset.tid = "participant-8:live:second-peer"; menu.append(second);
+      fail(() => TeamsReplyAdapter.snapshot(testState.config), /More than one chat participant/); second.remove();
+    });
+    check("diagnostics redact immutable participant IDs", () => {
+      const report = TeamsReplyAdapter.diagnostics(testState.config);
+      assert(!report.includes("fixture-peer") && !report.includes("Reply to this"), "Diagnostics exposed recipient or message content");
+      assert(report.includes("Stable conversation identity available: true"), "Identity status missing");
+    });
+    check("sibling sender lookup cannot reuse an author across multiple message rows", () => {
+      const item = list.lastElementChild; const duplicate = item.querySelector('[data-tid="chat-pane-message"]').cloneNode(true);
+      duplicate.dataset.messageId = "modern-ambiguous"; item.append(duplicate);
+      fail(() => TeamsReplyAdapter.snapshot(testState.config), /identify every sender/); duplicate.remove();
+    });
+    $("mode").value = "auto"; await click("start");
+    list.append(modernMessage("modern-3", "Alice", "Another incoming message")); list.scrollTop = list.scrollHeight;
+    await tick(); testState.now += 1100; await tick(); await tick();
+    check("reported Teams layout generates and sends through its actual Send control", () => {
+      assert(testState.sendCount === 3, `Modern automatic send failed: ${$("status").textContent}`);
+      assert($("status").textContent.includes("Reply appeared"), "Modern outgoing echo not verified");
+    });
+    await click("pause");
     document.getElementById("test-result").textContent = `PASS (${checked.length} browser checks)\n${checked.join("\n")}`;
     document.documentElement.dataset.testResult = "pass";
   } catch (error) {

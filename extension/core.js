@@ -2,14 +2,19 @@
 (function (root) {
   "use strict";
   const DEFAULT_SELECTORS = {
-    header: '[data-tid="chat-header-title"], [data-tid="chat-topic"], [data-tid="chat-pane-title"]',
+    header: '[data-tid="chat-title"], [data-tid="chat-header-title"], [data-tid="chat-topic"], [data-tid="chat-pane-title"]',
     row: '[data-tid="chat-pane-message"]',
-    body: '[data-tid="message-body"], [data-tid="messageBodyContent"], [data-tid="chat-pane-message-content"]',
+    body: '[data-tid="message-body"], [data-tid="messageBodyContent"], [data-tid="chat-pane-message-content"], [id^="content-"], .fui-ChatMessage__body',
     author: '[data-tid="message-author-name"], [data-tid="chat-pane-message-author"]',
     composer: '[data-tid="ckeditor"] [contenteditable="true"], [data-tid="ckeditor"][contenteditable="true"], [role="textbox"][contenteditable="true"][data-tid="message-editor"]',
-    send: 'button[data-tid="send-message"], button[data-tid="sendMessageButton"]',
+    send: '[data-tid="sendMessageCommands-send"], button[data-tid="send-message"], button[data-tid="sendMessageButton"]',
     scroller: '[data-tid="message-pane-list-viewport"], [data-tid="chat-pane-list"]',
     identity: '[data-chat-id][aria-selected="true"], [data-conversation-id][aria-selected="true"]'
+  };
+  const LEGACY_SELECTORS = {
+    header: '[data-tid="chat-header-title"], [data-tid="chat-topic"], [data-tid="chat-pane-title"]',
+    body: '[data-tid="message-body"], [data-tid="messageBodyContent"], [data-tid="chat-pane-message-content"]',
+    send: 'button[data-tid="send-message"], button[data-tid="sendMessageButton"]'
   };
   const DEFAULTS = {
     provider: "ollama", baseUrl: "http://127.0.0.1:11434", model: "qwen2.5:1.5b",
@@ -30,6 +35,10 @@
   }
   function settings(raw = {}) {
     const result = { ...DEFAULTS, ...raw, selectors: { ...DEFAULT_SELECTORS, ...raw.selectors } };
+    // Existing installations saved the old defaults, which would otherwise mask fixes.
+    for (const [key, oldValue] of Object.entries(LEGACY_SELECTORS)) {
+      if (result.selectors[key] === oldValue) result.selectors[key] = DEFAULT_SELECTORS[key];
+    }
     endpoint(result.baseUrl, result.provider);
     result.model = normalize(result.model);
     if (!result.model || result.model.length > 200) throw new Error("Enter your server's exact model ID.");
@@ -102,7 +111,7 @@
     return current.atBottom && original.identity === current.identity && fingerprint(original) === fingerprint(current) &&
       current.messages.at(-1)?.role === "other";
   }
-  const api = { DEFAULTS, DEFAULT_SELECTORS, normalize, endpoint, settings, contextWindow, modelRequest, replyText, fingerprint, isFresh };
+  const api = { DEFAULTS, DEFAULT_SELECTORS, LEGACY_SELECTORS, normalize, endpoint, settings, contextWindow, modelRequest, replyText, fingerprint, isFresh };
   root.TeamsReplyCore = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(globalThis);

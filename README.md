@@ -2,7 +2,7 @@
 
 A Chrome/Edge extension that uses your local Qwen model to write short replies in one selected Microsoft Teams chat. Controls live inside the Teams page, including an installed PWA, so a browser toolbar is unnecessary.
 
-The extension is implemented and tested against a Teams-like browser fixture. **Your live Teams PWA has not been tested here.** The initial DOM selectors may need adjustment for your account/UI.
+The extension is implemented and tested against browser fixtures, including the title, sender placement, and Send control reported by your Teams PWA. **Live end-to-end operation has not been verified here.** Other Teams UI variants may need selector adjustments.
 
 ## Install in your PWA's browser
 
@@ -52,14 +52,16 @@ Only HTTP endpoints on `localhost` or `127.0.0.1` are accepted. Model requests r
 
 ## If selectors differ
 
-The panel reports when it cannot identify a title, message, sender, ID, scroller, composer, or Send button. In **Settings → Teams selectors**, update the JSON CSS selectors using the PWA's DevTools. Save, select the chat again, and inspect the context.
+The panel reports when it cannot identify a title, message, sender, ID, scroller, composer, or Send button. Failed selection automatically opens a page check and keeps Start/Generate disabled so a later click cannot hide the original error. You can also click **Check Teams page → Copy page check** and share the report here to diagnose your PWA's selectors. The report contains selector counts and DOM metadata, without message text, chat names, message/chat IDs, or model settings.
+
+In **Settings → Teams selectors**, update the JSON CSS selectors using the PWA's DevTools. Save, select the chat again, and inspect the context. After updating extension files, reload the extension from `chrome://extensions` or `edge://extensions`, then reload the PWA; reloading only Teams does not necessarily pick up extension updates.
 
 | Selector | Required match |
 | --- | --- |
 | `header` | One visible title containing only the other person's display name |
 | `row` | Each visible message container with `data-message-id`, `data-mid`, or a stable `id` |
-| `body` | One text body inside each message row |
-| `author` | A display name inside each row; `data-author-name` on the row is also accepted |
+| `body` | One text body inside each row; the default also reads untagged `chat-pane-message` text after removing action/reaction controls and media previews |
+| `author` | A display name inside the row or its enclosing `chat-pane-item`, which must contain exactly one message; `data-author-name` on the row is also accepted |
 | `composer` | One visible Teams `contenteditable` input |
 | `send` | One visible Teams Send button |
 | `scroller` | The actual scrolling viewport containing the message rows |
@@ -67,7 +69,9 @@ The panel reports when it cannot identify a title, message, sender, ID, scroller
 
 A row explicitly marked `data-is-own-message="true"` can identify your own messages without a name. Other missing authors stop generation; a message never inherits the preceding row's sender. Attachment-only rows are skipped.
 
-A chat ID can also come from the title's ancestors or a Teams URL containing a `19:` chat ID. **Automatic sending requires a stable ID.** Without it, draft mode can bind to the displayed title; inspect the person carefully, since names are not unique. Do not invent a fixed ID or select unrelated sidebar items to bypass this check.
+A conversation key can come from the title's ancestors or a Teams URL containing a `19:` chat ID. In the personal-account UI, exactly one `participant-` key inside `chat-title` can identify the selected recipient instead. Multiple participant keys are rejected. **Automatic sending requires a stable conversation key.** Without one, draft mode can bind to the displayed title; inspect the person carefully, since names are not unique. Do not invent a fixed ID or select unrelated sidebar items to bypass this check.
+
+Saved original default selectors migrate automatically to newer defaults when the extension loads; custom selectors, model settings, and your display name are preserved. Reload the extension and PWA to apply updates; there is no need to reset your settings.
 
 Virtualized lists may expose fewer than five messages. The extension uses only loaded text and does not scroll to fetch history. Scrolling away from the bottom pauses monitoring.
 

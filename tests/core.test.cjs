@@ -28,6 +28,15 @@ test("settings reject invalid bounds and merge selector overrides", () => {
   assert.equal(Core.settings({ selectors: { header: "h1" } }).selectors.header, "h1");
   assert.equal(Core.settings({ selectors: { header: "h1" } }).selectors.row, Core.DEFAULT_SELECTORS.row);
 });
+test("saved original defaults migrate while custom selectors and model settings survive", () => {
+  const updated = Core.settings({ model: "my-qwen", selfName: "My Name", selectors: { ...Core.LEGACY_SELECTORS } });
+  for (const key of Object.keys(Core.LEGACY_SELECTORS)) assert.equal(updated.selectors[key], Core.DEFAULT_SELECTORS[key]);
+  assert.equal(updated.model, "my-qwen"); assert.equal(updated.selfName, "My Name");
+  const customized = Core.settings({ selectors: { header: "#my-chat", body: ".custom-message", send: ".custom-send" } });
+  assert.equal(customized.selectors.header, "#my-chat");
+  assert.equal(customized.selectors.body, ".custom-message");
+  assert.equal(customized.selectors.send, ".custom-send");
+});
 test("requests use the chosen provider and treat conversations as data", () => {
   const ollama = Core.modelRequest(config, messages);
   assert.equal(ollama.stream, false);

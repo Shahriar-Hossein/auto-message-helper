@@ -72,7 +72,7 @@
   }
   function inspect(snapshot) {
     $("copy-report").hidden = true;
-    $("context").textContent = `${snapshot.title}\nChat ID: ${snapshot.chatId || "not available (automatic sending disabled)"}\n\n` +
+    $("context").textContent = `${snapshot.title}\nConversation key: ${snapshot.chatId || "not available (automatic sending disabled)"}\n\n` +
       snapshot.messages.map(m => `${m.role === "me" ? "Me" : m.author}: ${m.text}`).join("\n\n");
   }
   function showPageCheck(error) {
@@ -160,7 +160,7 @@
     const version = epoch;
     const snapshot = current();
     selectedMode = $("mode").value;
-    if (selectedMode === "auto" && !snapshot.chatId) throw new Error("Automatic sending requires a stable chat ID. See Settings and README for the identity selector. Draft mode is available.");
+    if (selectedMode === "auto" && !snapshot.chatId) throw new Error("Automatic sending requires a stable conversation identity (chat ID or one-to-one participant ID). Draft mode is available.");
     if (pendingDelivery) throw new Error("Previous delivery is uncertain. Check the conversation, then select the chat again.");
     if (!Teams.composerEmpty(config)) throw new Error("Clear or send your existing Teams draft before starting.");
     await request({ type: "claim" });

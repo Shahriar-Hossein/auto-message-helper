@@ -25,7 +25,7 @@
       <p class="hint">Add facts you want the model to know. A conservative 3,500-byte prompt limit also applies, leaving room in Qwen's 4,096-token context for the reply. Long messages and preferences may be shortened.</p>
     </fieldset>
     <details><summary>Teams selectors — adjust if your UI differs</summary>
-      <p class="hint">These are initial candidates, not selectors verified against your PWA. Each chat must have one visible title and composer, one body per message, and stable message IDs. Automatic sending also needs a chat ID from <code>data-chat-id</code>, <code>data-conversation-id</code>, <code>data-thread-id</code>, or a Teams chat route containing <code>19:</code>. The identity selector must select the current chat only.</p>
+      <p class="hint">Each chat must have one visible title and composer, readable message text, and stable message IDs. Authors can be siblings inside each message's own <code>chat-pane-item</code>. Automatic sending needs a chat ID from <code>data-chat-id</code>, <code>data-conversation-id</code>, <code>data-thread-id</code>, a Teams route containing <code>19:</code>, or exactly one immutable <code>participant-</code> key in the chat title. The identity selector must select the current chat only.</p>
       <label>Selector configuration (JSON)<textarea id="selectors" rows="14" spellcheck="false"></textarea></label>
       <button type="button" id="reset-selectors" class="secondary">Reset selectors</button>
     </details>
