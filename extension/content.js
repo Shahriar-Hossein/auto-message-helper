@@ -20,7 +20,7 @@
     details{margin-top:10px}pre{white-space:pre-wrap;max-height:180px;overflow:auto;background:#151827;padding:8px;border-radius:7px}
     [hidden]{display:none!important}small{color:#b8bfd7}
   </style><section aria-label="Teams Local Replies">
-    <header><strong>Local Replies <small>v0.2.4</small></strong><button id="collapse" aria-label="Collapse panel">−</button></header>
+    <header><strong>Local Replies <small>v0.2.6</small></strong><button id="collapse" aria-label="Collapse panel">−</button></header>
     <div id="controls">
       <p id="selected">No chat selected</p><p id="status" role="status">Paused. Open Settings to configure your model and name.</p>
       <div class="row"><button id="settings">Settings</button><button class="primary" id="select">Select this chat</button><button id="diagnose">Check Teams page</button></div>
@@ -44,6 +44,7 @@
   let resumePending = false, resumeDue = 0;
   const unreadSeen = new Map();
   const unreadQueue = new Map();
+  const unsupportedChats = new Set();
   let scanDue = 0, lastUnreadCount = 0;
   const marks = new Map();
   async function saveMonitor() { await chrome.storage.local.set({ monitor }); }
@@ -224,7 +225,7 @@
     $("start").disabled = true; $("pause").disabled = false; $("mode").disabled = true; $("scope").disabled = true;
     status(`Watching ${scope === "all" ? "all unread direct chats" : "this chat"} (${selectedMode === "auto" ? "automatic send" : "draft mode"}). Enabled across reloads.`);
     if (scope === "all") {
-      unreadQueue.clear(); unreadSeen.clear(); scanDue = 0;
+      unreadQueue.clear(); unreadSeen.clear(); unsupportedChats.clear(); scanDue = 0;
       await scanInbox(true);
       if (running) await navigateUnread();
     } else $("inbox-status").textContent = "Watching the selected chat only.";
@@ -297,6 +298,7 @@
       const result = await Teams.scanUnread(config, () => running && version === epoch && revision === userRevision);
       if (version !== epoch || !running || revision !== userRevision) return;
       for (const item of result.unread) {
+        if (unsupportedChats.has(item.key)) continue;
         const previous = unreadSeen.get(item.key);
         if (!previous || previous.signature !== item.signature || previous.until <= Date.now()) unreadQueue.set(item.key, item);
       }
@@ -313,34 +315,43 @@
   async function navigateUnread() {
     if (!running || monitor.scope !== "all" || busy || pendingDelivery || navigating || $("draft").value.trim()) return false;
     await scanInbox();
-    const target = unreadQueue.values().next().value;
-    if (!target) return false;
-    const version = epoch, revision = userRevision;
-    try {
-      if (!Teams.composerEmpty(config)) { status("Unread chats are queued; waiting for your Teams draft to be cleared."); return false; }
-    } catch (error) {
-      if (!/found 0\./.test(error.message)) { status(error.message); return false; }
-    }
-    navigating = true; unreadQueue.delete(target.key);
-    $("inbox-status").textContent = `Unread inbox: ${lastUnreadCount} found, ${unreadQueue.size} queued. Scanning while enabled.`;
-    status(`Opening unread chat from ${target.title} (${unreadQueue.size} more queued)…`);
-    try {
-      const opened = await Teams.openUnread(config, target, () => running && version === epoch && revision === userRevision);
-      if (version !== epoch || !running) return false;
-      unreadSeen.set(target.key, { signature: target.signature, until: Date.now() + 5000 });
-      if (!opened.chatId && selectedMode === "auto") { status("Skipped an unread chat without a stable conversation identity."); return false; }
-      bind(opened); baseline = Core.fingerprint(opened); marks.set(opened.identity, baseline);
-      due = opened.messages.at(-1)?.role === "other" ? Date.now() + config.debounceMs : 0;
-      inspect(opened);
-      status(due ? `Unread chat opened. Preparing a reply (${unreadQueue.size} more queued)…` : `Unread chat has no unanswered incoming message (${unreadQueue.size} more queued).`);
-      return true;
-    } catch (error) {
-      if (version === epoch && running) {
-        unreadSeen.set(target.key, { signature: target.signature, until: Date.now() + 30000 });
-        status(`Skipped unread chat: ${error.message}`);
+    const candidates = unreadQueue.size;
+    for (let attempt = 0; attempt < candidates && running; attempt++) {
+      const target = unreadQueue.values().next().value;
+      if (!target) return false;
+      const version = epoch, revision = userRevision;
+      try {
+        if (!Teams.composerEmpty(config)) { status("Unread chats are queued; waiting for your Teams draft to be cleared."); return false; }
+      } catch (error) {
+        if (!/found 0\./.test(error.message)) { status(error.message); return false; }
       }
-      return false;
-    } finally { navigating = false; }
+      navigating = true; unreadQueue.delete(target.key);
+      $("inbox-status").textContent = `Unread inbox: ${lastUnreadCount} found, ${unreadQueue.size} queued. Scanning while enabled.`;
+      status(`Opening unread chat from ${target.title} (${unreadQueue.size} more queued)…`);
+      try {
+        const opened = await Teams.openUnread(config, target, () => running && version === epoch && revision === userRevision);
+        if (version !== epoch || !running || revision !== userRevision) return false;
+        // Once opening marks a chat read, a new unread appearance is a new event,
+        // even if its preview text is identical and the person replies immediately.
+        if (Teams.unreadChats(config).some(item => item.key === target.key)) {
+          unreadSeen.set(target.key, { signature: target.signature, until: Date.now() + 5000 });
+        } else unreadSeen.delete(target.key);
+        if (!opened.chatId && selectedMode === "auto") { status("Skipped an unread chat without a stable conversation identity."); continue; }
+        bind(opened); baseline = Core.fingerprint(opened); marks.set(opened.identity, baseline);
+        due = opened.messages.at(-1)?.role === "other" ? Date.now() + config.debounceMs : 0;
+        inspect(opened);
+        status(due ? `Unread chat opened. Preparing a reply (${unreadQueue.size} more queued)…` : `Unread chat has no unanswered incoming message (${unreadQueue.size} more queued).`);
+        return true;
+      } catch (error) {
+        if (version === epoch && running) {
+          if (error.code === "UNSUPPORTED_CHAT") unsupportedChats.add(target.key);
+          unreadSeen.set(target.key, { signature: target.signature, until: Date.now() + 30000 });
+          status(`Skipped unread chat: ${error.message}`);
+        }
+        if (version !== epoch || revision !== userRevision) return false;
+      } finally { navigating = false; }
+    }
+    return false;
   }
   let ticking = false;
   setInterval(async () => {
@@ -359,6 +370,7 @@
       if (running && monitor.scope === "all" && !pendingDelivery && !busy) {
         try { snapshot = Teams.snapshot(config); }
         catch {
+          due = 0;
           selected = null; $("generate").disabled = true; $("preview").disabled = true; $("selected").textContent = "Waiting for an unread direct chat";
           await navigateUnread(); return;
         }

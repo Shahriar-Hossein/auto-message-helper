@@ -11,13 +11,18 @@
     return elements[0];
   }
   const text = element => (element?.innerText ?? element?.textContent ?? "").trim();
+  function unsupportedChat(message) {
+    const error = new Error(message);
+    error.code = "UNSUPPORTED_CHAT";
+    return error;
+  }
   function participants(header) {
     // The reported PWA places immutable participant keys inside chat-title.
     return [...header.querySelectorAll('[data-tid^="participant-"]')];
   }
   function chatTitle(header) {
     const peers = participants(header);
-    if (peers.length > 1) throw new Error("More than one chat participant found. Only one-to-one chats are supported.");
+    if (peers.length > 1) throw unsupportedChat("More than one chat participant found. Only one-to-one chats are supported.");
     return Core.normalize(text(peers[0] || header));
   }
   function stableId(header, config) {
@@ -146,9 +151,10 @@
       lastTextRow = row;
     }
     if (!messages.length) throw new Error("No readable text messages found.");
-    if (authors.size > 2) throw new Error("More than two senders found. Only one-to-one chats are supported.");
+    if (authors.size > 2) throw unsupportedChat("More than two senders found. Only one-to-one chats are supported.");
     const otherNames = [...authors].filter(name => name !== config.selfName);
-    if (otherNames.length > 1 || (otherNames.length === 1 && otherNames[0] !== title)) {
+    if (otherNames.length > 1) throw unsupportedChat("More than one other sender found. Only one-to-one chats are supported.");
+    if (otherNames.length === 1 && otherNames[0] !== title) {
       throw new Error("The chat title must exactly match the other person's message author. Group chats and ambiguous names are excluded.");
     }
     const bounded = messages.slice(-limit);
@@ -222,6 +228,12 @@
     }
   }
   const AVATAR = 'img, [role="img"]:not(svg), [data-tid*="avatar"], [class*="avatar" i]';
+  function sidebarSection(node) {
+    if (node.matches('[role="group"], [role="tree"], [role="list"], [role="tab"]')) return true;
+    // A real chat row may also expose expansion state; keep rows that carry
+    // explicit conversation metadata rather than treating them as sections.
+    return node.hasAttribute("aria-expanded") && !node.matches('[data-chat-id], [data-conversation-id], [data-thread-id], [data-tid="chat-list-item"], [data-tid="chat-list-item-wrapper"], [data-tid="chatListItem"], [data-tid="chat-item"]');
+  }
   function nameElement(node) {
     const known = node.querySelector(CHAT_NAME);
     if (known) return known;
@@ -246,6 +258,9 @@
   function sidebarRow(node, config) {
     for (let candidate = node; candidate && candidate !== document.body; candidate = candidate.parentElement) {
       if (candidate.closest(IN_CONVERSATION) || candidate.querySelector(config.selectors.row)) return null;
+      // Favorites/Chats tree sections remain visible with Unread enabled, but
+      // expanding a section does not open a conversation.
+      if (sidebarSection(candidate)) return null;
       const names = all(CHAT_NAME, candidate);
       // Do not turn a whole list, a filter, or the app navigation badge into a chat.
       if (names.length > 1) return null;
@@ -258,13 +273,14 @@
     return null;
   }
   function sidebarRows(config) {
-    const rows = new Set(all(config.selectors.chatItem).filter(node => !node.closest(IN_CONVERSATION) && !node.querySelector(config.selectors.row) && all(CHAT_NAME, node).length <= 1 && all(config.selectors.chatItem, node).length <= 1 && nameElement(node)));
+    const rows = new Set(all(config.selectors.chatItem).filter(node => !sidebarSection(node) && !node.closest(IN_CONVERSATION) && !node.querySelector(config.selectors.row) && all(CHAT_NAME, node).length <= 1 && all(config.selectors.chatItem, node).length <= 1 && nameElement(node)));
     // The personal Teams PWA has heading-based sidebar entries without chat data-tid
     // values or data-chat-id. Resolve the heading and unread marker to their own row.
     for (const marker of [...all('[role="heading"]'), ...all(config.selectors.unread)]) {
       const row = sidebarRow(marker, config); if (row) rows.add(row);
     }
-    return [...rows].filter(node => ![...rows].some(parent => parent !== node && parent.contains(node)));
+    return [...rows].filter(node => ![...rows].some(parent => parent !== node && parent.contains(node)))
+      .sort((left, right) => left.compareDocumentPosition(right) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1);
   }
   function explicitUnread(node, config) {
     const markers = [node, ...all(config.selectors.unread, node)].filter(item => item.matches(config.selectors.unread));
@@ -342,12 +358,24 @@
     if (all(config.selectors.composer).length && !composerEmpty(config)) throw new Error("Your composer contains a draft or attachment. It was preserved.");
     const nameControl = nameElement(target.node)?.closest('button, a[href], [role="button"], [tabindex]');
     const control = nameControl && target.node.contains(nameControl) ? nameControl : target.node;
+    const matchesTarget = () => {
+      try {
+        const header = one(config.selectors.header, "chat title");
+        return target.id ? stableId(header, config) === target.id :
+          target.peer ? stableId(header, config) === `direct:${target.peer}` :
+            Core.normalize(text(header)) === target.title;
+      } catch { return false; }
+    };
+    const messageId = row => row.getAttribute("data-message-id") || row.getAttribute("data-mid") || row.id;
+    const previousIds = new Set(matchesTarget() ? [] : all(config.selectors.row).map(messageId));
     control.click();
-    let last = "", settled = 0;
+    let last = "", settled = 0, unsupported = "", unsupportedCount = 0;
     for (let attempt = 0; attempt < 24 && valid(); attempt++) {
       await delay(250);
+      if (!valid()) break;
       try {
         const result = snapshot(config);
+        unsupported = ""; unsupportedCount = 0;
         if (result.title !== target.title || target.id && result.chatId !== target.id || !target.id && target.peer && result.chatId !== `direct:${target.peer}`) continue;
         const mark = Core.fingerprint(result);
         settled = mark === last ? settled + 1 : 0; last = mark;
@@ -357,7 +385,16 @@
         await delay(250);
         const ready = snapshot(config);
         if (ready.identity === result.identity && ready.title === target.title && ready.atBottom) return ready;
-      } catch { /* Teams can temporarily remove the title/composer during navigation. */ }
+      } catch (error) {
+        // A new header can appear before its messages. Require repeated group
+        // evidence in the requested chat, never in the conversation we are leaving.
+        const oldMessages = all(config.selectors.row).some(row => previousIds.has(messageId(row)));
+        if (error.code === "UNSUPPORTED_CHAT" && matchesTarget() && !oldMessages) {
+          unsupportedCount = unsupported === error.message ? unsupportedCount + 1 : 1;
+          unsupported = error.message;
+          if (unsupportedCount >= 3) throw error;
+        } else { unsupported = ""; unsupportedCount = 0; }
+      }
     }
     throw new Error("Could not confirm the unread conversation. Check Teams selectors or chat loading.");
   }

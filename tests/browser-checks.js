@@ -373,7 +373,16 @@
     const personalSidebar = document.createElement("aside");
     const unreadFilter = document.createElement("button"); unreadFilter.textContent = "Unread"; unreadFilter.setAttribute("aria-label", "Filter unread chats"); unreadFilter.setAttribute("aria-pressed", "false");
     const personalList = document.createElement("div"); personalList.style.cssText = "height:220px;overflow-y:auto";
-    personalSidebar.append(unreadFilter, personalList); document.body.prepend(personalSidebar);
+    const favoritesSection = document.createElement("div"); favoritesSection.setAttribute("role", "treeitem"); favoritesSection.setAttribute("aria-expanded", "false");
+    const favoritesHeading = document.createElement("div"); favoritesHeading.setAttribute("role", "heading"); favoritesHeading.textContent = "Favorites";
+    favoritesSection.append(favoritesHeading);
+    const chatsSection = document.createElement("div"); chatsSection.setAttribute("role", "treeitem"); chatsSection.setAttribute("aria-expanded", "true");
+    const chatsHeading = document.createElement("div"); chatsHeading.setAttribute("role", "heading"); chatsHeading.textContent = "Chats";
+    chatsSection.append(chatsHeading, personalList);
+    let sectionClicks = 0;
+    favoritesSection.addEventListener("click", () => sectionClicks++);
+    chatsHeading.addEventListener("click", () => sectionClicks++);
+    personalSidebar.append(unreadFilter, favoritesSection, chatsSection); document.body.prepend(personalSidebar);
     const contacts = [
       { name: "Already read friend", unread: false, preview: "Old incoming message", revision: 0 },
       { name: "Abid Hasan", unread: true, preview: "hello chuckles...i heard...", revision: 0 },
@@ -386,16 +395,19 @@
         const row = document.createElement("div"); row.tabIndex = 0; row.setAttribute("role", "button"); row.style.cssText = "height:60px;cursor:pointer";
         const avatar = document.createElement("span"); avatar.setAttribute("role", "img"); avatar.textContent = "●";
         const lines = document.createElement("div");
-        const name = document.createElement("div"); if (contact.name !== "Ehsan") name.setAttribute("role", "heading"); name.style.fontWeight = contact.unread ? "700" : "400"; name.textContent = contact.name;
+        const name = document.createElement("div"); if (!["Ehsan", "Abid Hasan"].includes(contact.name)) name.setAttribute("role", "heading"); name.style.fontWeight = contact.unread ? "700" : "400"; name.textContent = contact.name;
         const preview = document.createElement("div"); preview.textContent = contact.preview; lines.append(name, preview);
         const nameButton = contact.name === "Dina" ? document.createElement("button") : null;
         if (nameButton) { nameButton.append(lines); row.append(avatar, nameButton); } else row.append(avatar, lines);
         if (contact.unread) { const dot = document.createElement("span"); dot.setAttribute("aria-label", "Unread"); dot.textContent = "•"; row.append(dot); }
         (nameButton || row).addEventListener("click", () => {
-          contact.unread = false; main.dataset.chatId = `personal-${contact.name}`; title.textContent = contact.name;
+          contact.opens = (contact.opens || 0) + 1;
+          if (!contact.group) contact.unread = false;
+          main.dataset.chatId = `personal-${contact.name}`; title.textContent = contact.name;
           list.replaceChildren();
           for (let i = 0; i < 25; i++) {
-            const message = document.createElement("div"); message.dataset.tid = "chat-pane-message"; message.dataset.messageId = `${contact.name}-${contact.revision}-${i}`; message.dataset.authorName = contact.name;
+            const message = document.createElement("div"); message.dataset.tid = "chat-pane-message"; message.dataset.messageId = `${contact.name}-${contact.revision}-${i}`;
+            message.dataset.authorName = contact.group ? ["Me", "Group member one", "Group member two"][i % 3] : contact.name;
             const body = document.createElement("p"); body.dataset.tid = "message-body"; body.textContent = `${contact.name}: ${contact.preview} (${i})`; message.append(body); list.append(message);
           }
           list.scrollTop = list.scrollHeight; renderPersonalSidebar();
@@ -410,10 +422,16 @@
     const initialPersonal = TeamsReplyAdapter.unreadChats(testState.config);
     const initialDinaNode = initialPersonal.find(item => item.title === "Dina").node;
     check("reported PWA heading rows and unread dots are detected without chat data attributes", () => {
-      assert(document.querySelectorAll(testState.config.selectors.chatItem).length === 0, "Fixture accidentally uses configured chat row selectors");
+      assert(personalList.querySelectorAll(testState.config.selectors.chatItem).length === 0, "Fixture accidentally uses configured chat row selectors");
       assert(initialPersonal.map(item => item.title).join(",") === "Abid Hasan,Dina", "Unread dots were not bound to their own named rows");
       assert(!initialPersonal.some(item => item.title === "Unread" || item.title === "Already read friend"), "Filter or read chat was treated as unread");
     });
+    unreadFilter.setAttribute("aria-pressed", "true"); renderPersonalSidebar();
+    check("Unread filtering excludes Favorites and Chats section controls", () => {
+      const names = TeamsReplyAdapter.unreadChats(testState.config).map(item => item.title);
+      assert(names.join(",") === "Abid Hasan,Dina", `Sidebar sections were queued as chats: ${names.join(",")}`);
+    });
+    unreadFilter.setAttribute("aria-pressed", "false"); renderPersonalSidebar();
     list.scrollTop = 0;
     const personalBefore = testState.sendCount;
     $("scope").value = "all"; $("mode").value = "auto"; await click("start");
@@ -437,16 +455,66 @@
       assert(title.textContent === "Ehsan" && testState.sendCount === personalBefore + 3, `New unread chat was missed: ${$("status").textContent}`);
     });
     const abid = contacts.find(contact => contact.name === "Abid Hasan"); abid.unread = true; abid.revision++; renderPersonalSidebar();
+    check("a single unread chat with a plain name remains selectable beneath a Chats section", () => {
+      const unread = TeamsReplyAdapter.unreadChats(testState.config);
+      assert(unread.length === 1 && unread[0].title === "Abid Hasan" && unread[0].node.parentElement === personalList, "A section container hid the only unread recipient");
+    });
     testState.now += 3100; await tick(); testState.now += 1100; await tick(); await tick();
     check("a previously answered person can become unread again with the same sidebar preview", () => {
       assert(title.textContent === "Abid Hasan" && testState.sendCount === personalBefore + 4, `Repeat unread contact was suppressed: ${$("status").textContent}`);
       const payload = testState.requests.filter(message => message.type === "generate").at(-1);
       assert(payload.messages.at(-1).id.includes("Abid Hasan-1-"), "Repeat contact used stale messages");
     });
+    const unreadGroup = { name: "Unread group", group: true, unread: true, preview: "Group discussion", revision: 0 };
+    contacts.unshift(unreadGroup); renderPersonalSidebar();
+    personalList.firstElementChild.click();
+    abid.unread = true; abid.revision++; renderPersonalSidebar();
+    testState.now += 2100; await tick();
+    check("a group at the front of the unread queue does not block an immediate reply from an answered person", () => {
+      assert(title.textContent === "Abid Hasan" && $("status").textContent.includes("Preparing a reply"), `Group blocked the unread reply: ${$("status").textContent}`);
+    });
+    testState.now += 1100; await tick(); await tick();
+    check("a quick identical-preview reply while a group is open uses fresh direct-chat context", () => {
+      const payload = testState.requests.filter(message => message.type === "generate").at(-1);
+      assert(testState.sendCount === personalBefore + 5 && payload.messages.at(-1).id.includes("Abid Hasan-2-"), "Quick repeat reply was lost or used stale context");
+      assert(payload.messages.every(message => message.text.includes("Abid Hasan")), "Group context leaked into a direct reply");
+    });
+    const groupOpens = unreadGroup.opens;
+    unreadGroup.preview = "Another group message"; unreadGroup.revision++; renderPersonalSidebar();
+    testState.now += 31000; await tick(); await tick();
+    check("confirmed groups stay skipped across rescans and changing previews", () => {
+      assert(unreadGroup.opens === groupOpens && title.textContent === "Abid Hasan" && testState.sendCount === personalBefore + 5, "Watcher reopened or answered an unsupported group");
+      assert(sectionClicks === 0, "Watcher clicked a sidebar section instead of a chat");
+    });
     await click("pause");
     contacts.push({ name: "Paused contact", unread: true, preview: "Do not send while paused", revision: 0 }); renderPersonalSidebar();
     testState.now += 3100; await tick();
-    check("Pause stops unread scanning and automatic queue delivery", () => assert(testState.sendCount === personalBefore + 4 && title.textContent === "Abid Hasan", "Paused watcher opened or answered another chat"));
+    check("Pause stops unread scanning and automatic queue delivery", () => assert(testState.sendCount === personalBefore + 5 && title.textContent === "Abid Hasan", "Paused watcher opened or answered another chat"));
+    // Teams can replace the title before replacing the previous group's rows.
+    personalList.firstElementChild.click();
+    const slowDirect = document.createElement("button"); slowDirect.dataset.tid = "chat-list-item";
+    slowDirect.setAttribute("aria-expanded", "false");
+    slowDirect.dataset.chatId = "slow-direct"; slowDirect.dataset.chatName = "Slow direct"; slowDirect.dataset.unread = "true";
+    const slowTitle = document.createElement("span"); slowTitle.dataset.tid = "chat-list-item-title"; slowTitle.textContent = "Slow direct";
+    slowDirect.append(slowTitle); personalList.append(slowDirect);
+    slowDirect.addEventListener("click", () => {
+      main.dataset.chatId = "slow-direct"; title.textContent = "Slow direct";
+      setTimeout(() => {
+        list.replaceChildren();
+        const message = document.createElement("div"); message.dataset.tid = "chat-pane-message";
+        message.dataset.messageId = "slow-direct-incoming"; message.dataset.authorName = "Slow direct";
+        const body = document.createElement("p"); body.dataset.tid = "message-body"; body.textContent = "The direct messages finished loading";
+        message.append(body); list.append(message);
+      }, 1200);
+    });
+    const slowTarget = TeamsReplyAdapter.unreadChats(testState.config).find(item => item.key === "slow-direct");
+    check("explicit conversation rows remain selectable when Teams sets expansion state", () => {
+      assert(slowTarget?.node === slowDirect, "A real conversation was mistaken for a sidebar section");
+    });
+    const slowOpened = await TeamsReplyAdapter.openUnread(testState.config, slowTarget);
+    check("delayed direct-chat loading cannot inherit the previous group's rejection", () => {
+      assert(slowOpened.chatId === "slow-direct" && slowOpened.messages.at(-1).id === "slow-direct-incoming", "Previous group rows caused a direct chat to be skipped");
+    });
     personalSidebar.remove();
     const virtualSidebar = document.createElement("div"); virtualSidebar.style.cssText = "height:120px;overflow-y:auto"; document.body.prepend(virtualSidebar);
     const virtualNames = Array.from({ length: 10 }, (_, i) => i === 1 ? "Visible unread" : i === 8 ? "Hidden unread" : `Read contact ${i}`);
