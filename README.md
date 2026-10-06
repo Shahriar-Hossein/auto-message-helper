@@ -1,78 +1,97 @@
-# Local Qwen replies for Microsoft Teams
+# Teams Local Replies
 
-Planning document only. No bot or extension has been implemented.
+A Chrome/Edge extension that uses your local Qwen model to write short replies in one selected Microsoft Teams chat. Controls live inside the Teams page, including an installed PWA, so a browser toolbar is unnecessary.
 
-**Goal:** Use the existing local Qwen 1.5B model to write short replies from my Teams account, using only the latest 5–10 messages from the relevant conversation. Start with one selected person's one-to-one chat in Teams web/PWA. Later, consider other direct chats and groups.
+The extension is implemented and tested against a Teams-like browser fixture. **Your live Teams PWA has not been tested here.** The initial DOM selectors may need adjustment for your account/UI.
 
-The intended result is an automatic reply in the existing conversation, under my account. A separate Teams bot account would be a different experience.
+## Install in your PWA's browser
 
-**Initial scope**
+1. Use the **same browser profile that installed your Teams PWA**.
+2. Open `chrome://extensions` or `edge://extensions`.
+3. Enable **Developer mode**, choose **Load unpacked**, and select this repository's **`extension/`** folder. No build or npm install is needed.
+4. Reload the Teams PWA (`Ctrl+R`), or close and reopen it. Look for **Local Replies** at the bottom right.
+5. Open **Settings** in that panel. The extension's browser action also opens settings.
 
-- One explicitly selected one-to-one conversation; groups and channels are excluded.
-- Keep the last 5–10 text messages total, including both participants and the incoming message, ordered oldest to newest.
-- Send only this window, a short reply instruction, and a few user-provided style preferences to the local model.
-- Aim for one or two short sentences. No full history, attachments, document retrieval, or model training.
-- Generate drafts first to evaluate quality, then enable automatic sending for this selected chat. Draft mode is a suggested experiment stage, not the final goal.
+Supported hosts: `teams.microsoft.com`, `teams.cloud.microsoft`, and `teams.live.com`. This targets a Chromium web/PWA installation, not the native Teams desktop app, Firefox, Safari, or sovereign-cloud hosts. Verify PWA injection in your browser/profile. [Chrome content scripts](https://developer.chrome.com/docs/extensions/develop/concepts/content-scripts)
 
-**Setup options**
+## Connect your model
 
-| Setup | What it needs | Reply as me? | Main tradeoff |
-| --- | --- | --- | --- |
-| Small Chrome/Edge extension + local model API | Extension in the Teams browser profile; local model server | Yes, through the Teams composer | Best fit for this experiment; depends on the loaded chat and Teams page structure |
-| Tampermonkey userscript + local model API | Userscript manager; small script; local model server | Yes, through the Teams composer | Quick prototype, with the same page-reading limitations |
-| Local service + Microsoft Graph | Microsoft Entra app registration, sign-in, delegated permissions, local model server | Yes, using delegated sending | Better foundation for multiple chats; more account setup |
-| Official Teams bot + local model backend | Teams app/bot registration and message delivery infrastructure | Usually a separate bot identity | Useful if people should chat with a bot; less suited to replies from my existing account |
+Choose the server you already use; the example Qwen name is a default, not a claim about your installed model.
 
-**Option 1 — browser extension: recommended for the first experiment**
+| Setting | Ollama | LM Studio / OpenAI-compatible |
+| --- | --- | --- |
+| Server type | Ollama | OpenAI-compatible / LM Studio |
+| Base URL | `http://127.0.0.1:11434` | `http://127.0.0.1:1234/v1` |
+| Model ID | Exact name from `ollama list`, e.g. `qwen2.5:1.5b` | Exact model ID from your server's `/v1/models` |
 
-The extension reads messages from the selected Teams page, sends a compact context window to the local model, and places the response in the Teams composer. Automatic mode would also activate Send after checking the conversation again. Chrome content scripts can read and modify the page's DOM. [Chrome content scripts documentation](https://developer.chrome.com/docs/extensions/develop/concepts/content-scripts)
+Start the server and warm up the model. Enter **your exact Teams display name**, as shown on your sent messages, then choose **Save & test model**. The test sends a synthetic greeting, not your chat history.
 
-Use an extension background component to call the local API, with host access limited to the actual Teams site and local endpoint. Content-script requests remain subject to the page's cross-origin restrictions; extension-context requests can use host permissions. [Chrome network request documentation](https://developer.chrome.com/docs/extensions/develop/concepts/network-requests)
+Ollama requests use `/api/chat`, with streaming disabled. If its origin policy blocks the connection, find the extension ID on the browser's extensions page and add `chrome-extension://YOUR_EXTENSION_ID` to the **running server's** `OLLAMA_ORIGINS`. Restart that server with the updated environment. For a manually started server:
 
-Start in a normal Teams browser tab, then verify operation inside the existing PWA, in the same browser profile. PWA behavior has not been tested here. Use controls embedded in the chat page so operation does not depend on a browser-toolbar popup.
+```bash
+OLLAMA_ORIGINS="chrome-extension://YOUR_EXTENSION_ID" ollama serve
+```
 
-This approach reads messages currently loaded in the page. We must inspect the actual Teams UI to confirm that the latest 5–10 messages can be extracted correctly; scrolling and virtualized message lists can leave messages absent from the DOM. Keep the selected conversation open and current for the first experiment. It does not provide reliable monitoring of every unopened chat, and it stops when the page closes; background suspension can also affect operation.
+For a system service, configure its environment instead of starting a second server on the same port. [Ollama origin configuration](https://github.com/ollama/ollama/blob/main/docs/faq.mdx), [Ollama chat API](https://docs.ollama.com/api/chat)
 
-**Option 2 — Tampermonkey: quickest prototype**
+LM Studio uses `/v1/chat/completions`; enable its local server and select its actual model ID. [LM Studio chat completions](https://lmstudio.ai/docs/developer/openai-compat/chat-completions)
 
-A userscript can implement the same read → generate → draft/send flow with less extension packaging. Tampermonkey provides cross-origin requests through `GM_xmlhttpRequest`, with allowed destinations declared through `@connect`. [Tampermonkey documentation](https://www.tampermonkey.net/documentation.php)
+Only HTTP endpoints on `localhost` or `127.0.0.1` are accepted. Model requests run in the extension worker, use loopback host permissions, omit credentials, and reject redirects. [Chrome extension network requests](https://developer.chrome.com/docs/extensions/develop/concepts/network-requests)
 
-Choose this to test message extraction and reply quality quickly. It still needs chat identity checks, duplicate prevention, and maintenance when Teams changes its UI. Move to an extension if dedicated settings and pause controls become useful.
+## Use it
 
-**Option 3 — Microsoft Graph: stronger for broader coverage**
+1. Open the intended **one-to-one chat**, scroll to the bottom, and leave it open.
+2. Click **Select this chat**, then expand **Inspect loaded context**. Verify the person, order, and **Me** labels. The other sender's name must match the chat title. Groups and channels are excluded.
+3. Choose **Draft** and click **Start**. Existing messages establish a baseline. New incoming text triggers generation after a short wait for consecutive messages.
+4. Review/edit the reply, then choose **Insert draft**. Press Teams' own Send button. Monitoring waits while an unreviewed panel draft is present; insert or dismiss it to continue.
+5. Once extraction and replies work, pause, choose **Automatic send**, and start again. This mode inserts and clicks Teams Send after checking the chat, messages, and composer again.
 
-A local process signs in as the user, checks the selected chat for new messages, retrieves a small context window, calls Qwen locally, and sends through Graph. It can operate without keeping the Teams PWA open, while the local process and authentication remain available.
+**Generate now** drafts a reply to the latest incoming message, including one already present at startup or a previously failed attempt. It always creates a reviewable draft, even when Automatic send is selected. If the latest message is yours, it waits for an incoming message.
 
-For work/school accounts, listing chat messages supports delegated `Chat.Read`; sending supports delegated `ChatMessage.Send`. These APIs do not support delegated personal Microsoft accounts. App registration and consent depend on the organization's settings. These permissions are broader than a single-chat selection, so the implementation must enforce that selection itself. [List chat messages](https://learn.microsoft.com/en-us/graph/api/chat-list-messages?view=graph-rest-1.0), [Send a chat message](https://learn.microsoft.com/en-us/graph/api/chat-post-messages?view=graph-rest-1.0)
+**Pause** stops monitoring and discards in-flight results. It does not remove text already inserted in Teams. Switching chats or changing settings pauses operation. Reloading Teams starts paused and requires selecting the chat again. Only one window in this browser profile can control replies; an abandoned controller lease expires after 45 seconds.
 
-For the initial experiment, polling one chat avoids webhook hosting. Retrieve messages ordered by creation time descending, filter out system/deleted entries, and reverse the retained window before prompting. Pagination may be needed to obtain enough text messages. Ordinary automatic sending as the user requires delegated authentication; the documented application permission for this send endpoint is for migration. [Graph read parameters](https://learn.microsoft.com/en-us/graph/api/chat-list-messages?view=graph-rest-1.0), [Graph sending permissions](https://learn.microsoft.com/en-us/graph/api/chat-post-messages?view=graph-rest-1.0)
+## If selectors differ
 
-**Option 4 — official Teams bot: for a bot conversation**
+The panel reports when it cannot identify a title, message, sender, ID, scroller, composer, or Send button. In **Settings → Teams selectors**, update the JSON CSS selectors using the PWA's DevTools. Save, select the chat again, and inspect the context.
 
-A Teams bot normally receives interactions directed to it and replies with its own identity. It does not automatically inherit my existing person-to-person conversations or act as my account. Additional consent and authentication are needed for broader access or actions on behalf of a user. [Teams app permissions](https://learn.microsoft.com/en-us/microsoftteams/app-permissions)
+| Selector | Required match |
+| --- | --- |
+| `header` | One visible title containing only the other person's display name |
+| `row` | Each visible message container with `data-message-id`, `data-mid`, or a stable `id` |
+| `body` | One text body inside each message row |
+| `author` | A display name inside each row; `data-author-name` on the row is also accepted |
+| `composer` | One visible Teams `contenteditable` input |
+| `send` | One visible Teams Send button |
+| `scroller` | The actual scrolling viewport containing the message rows |
+| `identity` | An element for the **current chat** carrying `data-chat-id`, `data-conversation-id`, or `data-thread-id` |
 
-This is useful if a separate assistant account becomes acceptable. It adds more setup than the browser experiment needs.
+A row explicitly marked `data-is-own-message="true"` can identify your own messages without a name. Other missing authors stop generation; a message never inherits the preceding row's sender. Attachment-only rows are skipped.
 
-**Local model connection and context**
+A chat ID can also come from the title's ancestors or a Teams URL containing a `19:` chat ID. **Automatic sending requires a stable ID.** Without it, draft mode can bind to the displayed title; inspect the person carefully, since names are not unique. Do not invent a fixed ID or select unrelated sidebar items to bypass this check.
 
-Keep the current model runtime if it already exposes a local HTTP API. Otherwise, Ollama offers a chat endpoint, and LM Studio can expose a local model API server. The exact Qwen model name, variant, and runtime still need to be identified. [Ollama chat API](https://docs.ollama.com/api/chat), [LM Studio local server](https://lmstudio.ai/docs/developer/core/server)
+Virtualized lists may expose fewer than five messages. The extension uses only loaded text and does not scroll to fetch history. Scrolling away from the bottom pauses monitoring.
 
-With Ollama, browser-extension origins may need explicit allowance through `OLLAMA_ORIGINS`; use the specific extension origin where possible. Keep the model endpoint on loopback. Only model inference stays local—sending the reply still uses Teams. [Ollama origin configuration](https://github.com/ollama/ollama/blob/main/docs/faq.mdx)
+## Behavior and limits
 
-Use a short instruction such as: “Write my next reply. Keep it to one or two short sentences in my usual casual style. Use only the supplied facts. If information is missing, ask a short clarification. Output only the reply.” Label conversation messages as “me” and “other person,” and treat their contents as conversation data rather than instructions to the automation.
+- Uses the latest 5–10 loaded text messages, oldest to newest, labeled as you and the other person.
+- Applies a character budget and a conservative 3,500-byte serialized prompt budget, reserving room for formatting and 128 output tokens in Qwen's 4,096-token context. Long messages/preferences may be shortened. Other model/tokenizer limits depend on your server.
+- Generates one reply at a time, preserves existing composer drafts/attachments, and discards stale responses when messages change or you type during generation.
+- Reserves hashed attempt keys before inference. Failed or uncertain attempts are not automatically retried; **Generate now** explicitly retries as a draft.
+- After automatic Send, looks for a new matching outgoing message. If none appears within 12 seconds, pauses with uncertain delivery. This DOM observation is not a server delivery receipt; check Teams before trying again.
+- Aborts inference after 25 seconds, below the worker's fetch-response timeout. Warm up slow models first. [Chrome worker lifecycle](https://developer.chrome.com/docs/extensions/develop/concepts/service-workers/lifecycle)
+- Watches only the selected open chat. Closing the PWA stops operation. Browser throttling/suspension and Teams UI changes can delay or prevent replies.
 
-Start with five messages and increase to ten if replies miss context. Also cap input tokens: five long messages can exceed the intended budget. Reserve space for the reply and respect the model's actual context limit. Recent examples of my replies can guide tone, but the model cannot infer my schedule, progress, or intentions reliably. Any such facts must be supplied explicitly. Quality needs evaluation on representative conversations before relying on automatic replies.
+Settings use local extension storage. Chat context and replies stay in memory; session storage holds only hashed attempt keys and controller coordination. Inference goes to your loopback server; sending still uses Teams. Your server may have its own logging. No telemetry or Microsoft Graph registration is included.
 
-**Proposed experiment flow**
+## Development
 
-1. Select the exact chat, load recent messages, and establish a baseline so old messages do not trigger replies on startup.
-2. On a new incoming text message, wait briefly to collect consecutive messages into one turn.
-3. Build the bounded context window and request one short response.
-4. Show the draft during evaluation. In automatic mode, recheck the chat identity and latest messages before sending; discard a stale response if the conversation changed or I replied meanwhile.
-5. Ignore my outgoing messages, record handled incoming message IDs, and allow only one generation/send at a time. Preserve an existing composer draft and provide an obvious pause control. If delivery is uncertain, check the conversation before retrying.
+Node 20+; no dependencies:
 
-The first success criterion is a useful short response in the selected chat, with correct sender labels and no duplicate replies. Expansion to unopened direct chats is a separate coverage milestone; group support also needs explicit rules about which messages deserve a response.
+```bash
+npm run check
+npm test
+```
 
-**Recommendation:** Start with a small browser extension connected to the existing local model runtime. Choose Tampermonkey if the priority is the fastest disposable prototype. Choose Graph if reliable operation across multiple chats or with the Teams window closed is required.
+Tests cover prompt bounds, endpoint restrictions, freshness, worker sender validation, window ownership, concurrent inference, duplicates, and failed attempts. With Chrome/Chromium installed, the suite also opens `tests/browser.html` in an isolated temporary headless profile to exercise DOM extraction and rich-text insertion. Set `TEAMS_TEST_BROWSER` to an absolute Chromium executable path if needed. Process-launch permission is required; the browser test skips only if no browser is installed. You can also open the fixture manually.
 
-Before implementation, identify the browser behind the PWA, the Qwen runtime/model identifier, and whether the Teams account is work/school or personal. These details determine connectivity and whether Graph is available; they do not prevent this planning stage.
+Tests do not sign in to Teams or contact your model. The original architecture plan is preserved in [docs/design.md](docs/design.md).
