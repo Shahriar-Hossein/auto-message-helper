@@ -46,7 +46,7 @@ test("one Teams window owns the active controller", async () => {
 test("automatic duplicate attempts are blocked; an explicit manual draft can retry", async () => {
   const h = harness();
   await h.send({ type: "claim", token: "a" });
-  assert.equal((await h.send(h.payload)).reply, "Hello!");
+  assert.equal((await h.send(h.payload)).reply, Core.CHUCKLES_INTRO + "Hello!");
   assert.equal((await h.send(h.payload)).ok, false);
   assert.equal(h.requests(), 1);
   assert.equal((await h.send({ ...h.payload, manual: true })).ok, true);
@@ -81,7 +81,9 @@ test("concurrent generations serialize reservation and allow only one fetch", as
   assert.equal(second.ok, false);
   assert.match(second.error, /already being generated/);
   resolveFetch({ ok: true, json: async () => ({ message: { content: "Hello!" } }) });
-  assert.equal((await first).ok, true);
+  const result = await first;
+  assert.equal(result.ok, true);
+  assert.equal(result.reply, Core.CHUCKLES_INTRO + "Hello!");
   assert.equal(h.requests(), 1);
 });
 test("invalid or outgoing context never reaches the local API", async () => {
@@ -113,7 +115,9 @@ test("the worker sends actual recent messages as the model conversation", async 
     { id: "2", role: "me", text: "Yes, I have time this afternoon." },
     { id: "3", role: "other", text: "Should I send it now?\nIt is ready." }
   ];
-  assert.equal((await h.send({ ...h.payload, messages })).ok, true);
+  const result = await h.send({ ...h.payload, messages });
+  assert.equal(result.ok, true);
+  assert.equal(result.reply, Core.CHUCKLES_INTRO + "Yes, send me the report.");
   assert.deepEqual(body.messages.slice(1), messages.map(m => ({ role: m.role === "me" ? "assistant" : "user", content: m.text })));
   assert.equal(body.messages.at(-1).content, messages.at(-1).text);
 });

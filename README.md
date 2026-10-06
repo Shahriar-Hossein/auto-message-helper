@@ -1,6 +1,6 @@
 # Teams Local Replies
 
-A Chrome/Edge extension that uses your local Qwen model to write short replies in one selected Microsoft Teams chat. Controls live inside the Teams page, including an installed PWA, so a browser toolbar is unnecessary.
+A Chrome/Edge extension that uses your local Qwen model to write short replies as **Chuckles**, your playful AI sidekick, in one selected Microsoft Teams chat. Controls live inside the Teams page, including an installed PWA, so a browser toolbar is unnecessary.
 
 The extension is implemented and tested against browser fixtures, including the title, sender placement, and Send control reported by your Teams PWA. **Live end-to-end operation has not been verified here.** Other Teams UI variants may need selector adjustments.
 
@@ -58,6 +58,12 @@ Only HTTP endpoints on `localhost` or `127.0.0.1` are accepted. Model requests r
 **Generate now** drafts a reply to the latest incoming message, including one already present at startup or a previously failed attempt. It always creates a reviewable draft, even when Automatic send is selected. If the latest message is yours, it waits for an incoming message.
 
 While generating, the panel shows how many loaded messages it read and refreshes **Inspect loaded context** with those messages. The model receives them as conversation turns, with your earlier replies and the other person's messages assigned distinct roles, and is instructed to answer the latest message directly in its language.
+
+Chuckles speaks on your behalf and always calls you **my hooman**. Every generated reply starts with **“My hooman is busy, but I'm Chuckles, their AI sidekick, replying on their behalf.”** The extension adds this introduction so the recipient can identify the AI helper even if the model forgets. The rest responds to the actual conversation with light humor, becoming sincere for serious topics. For a friend's “don't forget me when u get rich,” an example reply is:
+
+> My hooman is busy, but I'm Chuckles, their AI sidekick, replying on their behalf. Worried about being forgotten when my hooman gets rich? Relax, my hooman is a good person who never forgets friends, even with a fancy wallet 😄
+
+The model is given your reassurance that your hooman is a good person who never forgets friends; it is instructed to avoid inventing financial success, gifts, deals, or commitments. Change **Settings → Chuckles' style and your known facts** to adjust the tone. The original default style updates automatically; custom styles remain saved. Example wording varies with your local model, and you can edit the panel draft before inserting it.
 
 **Insert draft** uses the editor's plain-text paste handling when available, or a native editing command with the caret explicitly placed in the composer. It waits for Teams to process the edit before clearing the panel draft. If Teams removes or changes the inserted text, the panel retains the reply and reports the failure so you can copy it manually. This follows [CKEditor's clipboard pipeline](https://ckeditor.com/docs/ckeditor5/latest/framework/deep-dive/clipboard.html); the actual Teams editor still needs live verification.
 

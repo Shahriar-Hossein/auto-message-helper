@@ -23,7 +23,8 @@
         <label>Context character budget<input name="maxContextChars" type="number" min="1000" max="12000" step="100" required></label>
         <label>Wait for consecutive messages (ms)<input name="debounceMs" type="number" min="1000" max="15000" step="500" required></label>
       </div>
-      <label>Your style and known facts<textarea name="style" rows="4" maxlength="1500" placeholder="Keep it casual. Use short sentences."></textarea></label>
+      <p class="hint">Chuckles replies as your AI sidekick, calls you “my hooman,” and tells recipients you are busy. Every generated reply includes that introduction. Adjust the humor and add your known facts below.</p>
+      <label>Chuckles' style and your known facts<textarea name="style" rows="4" maxlength="1500" placeholder="Playful and warm. Keep jokes relevant and replies short."></textarea></label>
       <p class="hint">Add facts you want the model to know. A conservative 3,500-byte prompt limit also applies, leaving room in Qwen's 4,096-token context for the reply. Long messages and preferences may be shortened.</p>
     </fieldset>
     <details><summary>Teams selectors — adjust if your UI differs</summary>
