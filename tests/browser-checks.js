@@ -295,6 +295,11 @@
     // Keep that control for all unread-queue and reload tests below.
     const pwaSend = document.createElement("div"); pwaSend.dataset.tid = "sendMessageCommands-send"; pwaSend.textContent = "Send";
     pwaSend.addEventListener("click", testState.sendFixtureReply); actualSend.replaceWith(pwaSend);
+    // Match the supplied report: Teams switches to the simplified composer when
+    // text is inserted, changing the Send data-tid after configuration was saved.
+    testState.config = { ...testState.config, selectors: { ...testState.config.selectors,
+      send: '[data-tid="sendMessageCommands-send"], button[data-tid="send-message"], button[data-tid="sendMessageButton"]' } };
+    editor.addEventListener("input", () => { pwaSend.dataset.tid = "newMessageCommands-send"; }, { once: true });
     const sidebar = document.createElement("nav"); document.body.prepend(sidebar);
     function unreadChat(id, name) {
       const item = document.createElement("button"); item.dataset.tid = "chat-list-item"; item.dataset.chatId = id; item.dataset.unread = "true";
@@ -324,6 +329,10 @@
     check("automatic replies click a roleless PWA Send control and leave no manual draft", () => {
       assert(pwaSend.tagName === "DIV" && !pwaSend.hasAttribute("role"), "Fixture still requires a native button");
       assert(editor.innerText === "" && $("draft").value === "" && $("status").textContent.includes("Reply appeared"), "Automatic send left a draft awaiting a manual click");
+    });
+    check("saved selector defaults support the simplified toolbar appearing during insertion", () => {
+      assert(pwaSend.dataset.tid === "newMessageCommands-send" && !document.querySelector('[data-tid="sendMessageCommands-send"]'), "Fixture still exposes the previous Send toolbar");
+      assert(TeamsReplyAdapter.diagnostics(TeamsReplyCore.settings(testState.config)).includes("send: 1 / 1"), "Reported simplified Send control was not matched");
     });
     await tick(); testState.now += 1100; await tick(); await tick();
     check("multiple unread conversations are answered sequentially", () => {

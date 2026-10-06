@@ -37,6 +37,16 @@ test("saved original defaults migrate while custom selectors and model settings 
   assert.equal(customized.selectors.body, ".custom-message");
   assert.equal(customized.selectors.send, ".custom-send");
 });
+test("saved 0.2.3 Send defaults migrate to both Teams compose toolbars", () => {
+  const saved = '[data-tid="sendMessageCommands-send"], button[data-tid="send-message"], button[data-tid="sendMessageButton"]';
+  const updated = Core.settings({ model: "my-local-model", selfName: "My Name", selectors: { send: saved } });
+  assert.equal(updated.selectors.send, Core.DEFAULT_SELECTORS.send);
+  assert.ok(updated.selectors.send.includes('[data-tid="newMessageCommands-send"]'));
+  assert.ok(updated.selectors.send.includes('[data-tid="sendMessageCommands-send"]'));
+  assert.equal(updated.model, "my-local-model");
+  assert.equal(updated.selfName, "My Name");
+  assert.equal(Core.settings({ selectors: { send: "#custom-send" } }).selectors.send, "#custom-send");
+});
 test("the original style migrates to Chuckles while custom preferences survive", () => {
   const originalStyle = "Casual and friendly. One or two short sentences. Do not invent commitments or facts.";
   const updated = Core.settings({ style: originalStyle, model: "my-qwen", selfName: "My Name" });

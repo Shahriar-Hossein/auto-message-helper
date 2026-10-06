@@ -7,7 +7,7 @@
     body: '[data-tid="message-body"], [data-tid="messageBodyContent"], [data-tid="chat-pane-message-content"], [id^="content-"], .fui-ChatMessage__body',
     author: '[data-tid="message-author-name"], [data-tid="chat-pane-message-author"]',
     composer: '[data-tid="ckeditor"] [contenteditable="true"], [data-tid="ckeditor"][contenteditable="true"], [role="textbox"][contenteditable="true"][data-tid="message-editor"]',
-    send: '[data-tid="sendMessageCommands-send"], button[data-tid="send-message"], button[data-tid="sendMessageButton"]',
+    send: '[data-tid="newMessageCommands-send"], [data-tid="sendMessageCommands-send"], button[data-tid="send-message"], button[data-tid="sendMessageButton"]',
     scroller: '[data-tid="message-pane-list-viewport"], [data-tid="chat-pane-list"]',
     identity: '[data-chat-id][aria-selected="true"], [data-conversation-id][aria-selected="true"]',
     chatItem: '[data-tid="chat-list-item"], [data-tid="chat-list-item-wrapper"], [data-tid="chatListItem"], [data-tid="chat-item"], [role="treeitem"], [role="listitem"], [role="option"]',
@@ -19,6 +19,7 @@
     body: '[data-tid="message-body"], [data-tid="messageBodyContent"], [data-tid="chat-pane-message-content"]',
     send: 'button[data-tid="send-message"], button[data-tid="sendMessageButton"]'
   };
+  const PREVIOUS_DEFAULT_SEND = '[data-tid="sendMessageCommands-send"], button[data-tid="send-message"], button[data-tid="sendMessageButton"]';
   const LEGACY_STYLE = "Casual and friendly. One or two short sentences. Do not invent commitments or facts.";
   const CHUCKLES_INTRO = "My hooman is busy, but I'm Chuckles, their AI sidekick, replying on their behalf. ";
   const DEFAULTS = {
@@ -44,6 +45,7 @@
     for (const [key, oldValue] of Object.entries(LEGACY_SELECTORS)) {
       if (result.selectors[key] === oldValue) result.selectors[key] = DEFAULT_SELECTORS[key];
     }
+    if (result.selectors.send === PREVIOUS_DEFAULT_SEND) result.selectors.send = DEFAULT_SELECTORS.send;
     if (raw.contextVersion !== 2 && [5, 10].includes(Number(raw.windowSize))) result.windowSize = 20;
     if (raw.contextVersion !== 2 && Number(raw.maxContextChars) === 6000) result.maxContextChars = 12000;
     result.contextVersion = 2;

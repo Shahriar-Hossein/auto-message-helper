@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Teams Local Replies",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Automatic local-model replies across unread Teams direct chats, with Banglish and media context.",
   "minimum_chrome_version": "120",
   "permissions": ["storage"],
