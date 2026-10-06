@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Teams Local Replies — Settings</title><link rel="stylesheet" href="options.css"></head>
+<body><main>
+  <span class="eyebrow">TEAMS LOCAL REPLIES</span>
+  <h1>Your replies. Your local model.</h1>
+  <p class="intro">Configure once, then use the Local Replies panel inside your Teams tab or installed PWA.</p>
+  <form id="settings">
+    <fieldset><legend>Local model</legend>
+      <div class="grid">
+        <label>Server type<select name="provider"><option value="ollama">Ollama</option><option value="openai">OpenAI-compatible / LM Studio</option></select></label>
+        <label>Base URL<input name="baseUrl" type="url" required placeholder="http://127.0.0.1:11434"></label>
+        <label>Model ID<input name="model" required maxlength="200" placeholder="qwen2.5:1.5b"></label>
+        <label>Your exact Teams display name<input name="selfName" required maxlength="200" placeholder="As shown on your sent messages"></label>
+      </div>
+      <p class="hint">Ollama: <code>http://127.0.0.1:11434</code>. LM Studio: <code>http://127.0.0.1:1234/v1</code>. Use the model ID reported by your server. Requests stay on localhost.</p>
+    </fieldset>
+    <fieldset><legend>Reply preferences</legend>
+      <div class="grid">
+        <label>Recent messages (5–10)<input name="windowSize" type="number" min="5" max="10" required></label>
+        <label>Context character budget<input name="maxContextChars" type="number" min="1000" max="12000" step="100" required></label>
+        <label>Wait for consecutive messages (ms)<input name="debounceMs" type="number" min="1000" max="15000" step="500" required></label>
+      </div>
+      <label>Your style and known facts<textarea name="style" rows="4" maxlength="1500" placeholder="Keep it casual. Use short sentences."></textarea></label>
+      <p class="hint">Add facts you want the model to know. A conservative 3,500-byte prompt limit also applies, leaving room in Qwen's 4,096-token context for the reply. Long messages and preferences may be shortened.</p>
+    </fieldset>
+    <details><summary>Teams selectors — adjust if your UI differs</summary>
+      <p class="hint">These are initial candidates, not selectors verified against your PWA. Each chat must have one visible title and composer, one body per message, and stable message IDs. Automatic sending also needs a chat ID from <code>data-chat-id</code>, <code>data-conversation-id</code>, <code>data-thread-id</code>, or a Teams chat route containing <code>19:</code>. The identity selector must select the current chat only.</p>
+      <label>Selector configuration (JSON)<textarea id="selectors" rows="14" spellcheck="false"></textarea></label>
+      <button type="button" id="reset-selectors" class="secondary">Reset selectors</button>
+    </details>
+    <div class="actions"><button type="submit">Save settings</button><button type="button" id="test" class="secondary">Save & test model</button></div>
+  </form>
+  <p id="status" role="status" aria-live="polite"></p>
+  <footer>After saving, open a direct chat in Teams, select it in the panel, inspect the sender labels, and press Start. Draft is the default; automatic sending is an explicit choice. Reloading Teams always starts paused.</footer>
+</main><script src="core.js"></script><script src="options.js"></script></body>
+</html>
