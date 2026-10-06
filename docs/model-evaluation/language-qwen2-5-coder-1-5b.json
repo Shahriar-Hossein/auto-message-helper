@@ -1,0 +1,101 @@
+[
+  {
+    "model": "qwen2.5-coder:1.5b",
+    "case": "call",
+    "language": "Banglish",
+    "text": "ektu age call diyechilen? ami library te achi",
+    "status": 200,
+    "raw": "Yes, I can help you with that.",
+    "done_reason": "stop",
+    "seconds": 1.516,
+    "unexpectedReasoningMarkers": false
+  },
+  {
+    "model": "qwen2.5-coder:1.5b",
+    "case": "call",
+    "language": "Bangla script",
+    "text": "একটু আগে কল দিয়েছিলেন? আমি লাইব্রেরিতে আছি।",
+    "status": 200,
+    "raw": "Yes, your hooman said \"একটু আগে কল দিয়েছিলেন? \" which means \"Did you read anything recently? \"",
+    "done_reason": "stop",
+    "seconds": 2.611,
+    "unexpectedReasoningMarkers": false
+  },
+  {
+    "model": "qwen2.5-coder:1.5b",
+    "case": "call",
+    "language": "English",
+    "text": "Did you call a moment ago? I am at the library.",
+    "status": 200,
+    "raw": "Yes, I did call a moment ago. I am at the library.",
+    "done_reason": "stop",
+    "seconds": 1.047,
+    "unexpectedReasoningMarkers": false
+  },
+  {
+    "model": "qwen2.5-coder:1.5b",
+    "case": "friends",
+    "language": "Banglish",
+    "text": "successful hole amader bhule jaben naki?",
+    "status": 200,
+    "raw": "Yes, you can do it!",
+    "done_reason": "stop",
+    "seconds": 0.645,
+    "unexpectedReasoningMarkers": false
+  },
+  {
+    "model": "qwen2.5-coder:1.5b",
+    "case": "friends",
+    "language": "Bangla script",
+    "text": "সফল হলে আমাদের ভুলে যাবেন নাকি?",
+    "status": 200,
+    "raw": "Yes, the other person is asking if everything went well.",
+    "done_reason": "stop",
+    "seconds": 1.278,
+    "unexpectedReasoningMarkers": false
+  },
+  {
+    "model": "qwen2.5-coder:1.5b",
+    "case": "friends",
+    "language": "English",
+    "text": "Will your owner forget us after becoming successful?",
+    "status": 200,
+    "raw": "No, my hooman will never forget us.",
+    "done_reason": "stop",
+    "seconds": 0.75,
+    "unexpectedReasoningMarkers": false
+  },
+  {
+    "model": "qwen2.5-coder:1.5b",
+    "case": "payment",
+    "language": "Banglish",
+    "text": "300 peyechi. amar kache apnar aro 200 paona, Thursday te dibo.",
+    "status": 200,
+    "raw": "Oh, that sounds like a fun game! Let's play it together, okay?",
+    "done_reason": "stop",
+    "seconds": 1.364,
+    "unexpectedReasoningMarkers": false
+  },
+  {
+    "model": "qwen2.5-coder:1.5b",
+    "case": "payment",
+    "language": "Bangla script",
+    "text": "৩০০ পেয়েছি। আমার কাছে আপনার আরও ২০০ পাওনা, বৃহস্পতিবার দেব।",
+    "status": 200,
+    "raw": "The other person is saying they have paid 300 pounds and still owe 200 pounds. They also mentioned they have a debt of 200 pounds to the bank.",
+    "done_reason": "stop",
+    "seconds": 2.567,
+    "unexpectedReasoningMarkers": false
+  },
+  {
+    "model": "qwen2.5-coder:1.5b",
+    "case": "payment",
+    "language": "English",
+    "text": "I received 300 from your owner. I still owe your owner 200, which I will pay Thursday.",
+    "status": 200,
+    "raw": "The other person has received 300 from your owner and still owes 200. They will pay this amount on Thursday.",
+    "done_reason": "stop",
+    "seconds": 1.626,
+    "unexpectedReasoningMarkers": false
+  }
+]

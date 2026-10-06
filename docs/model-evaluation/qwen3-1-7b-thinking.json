@@ -1,0 +1,16 @@
+[
+  {
+    "model": "qwen3:1.7b",
+    "profile": "thinking",
+    "case": "call-and-library",
+    "criterion": "Understand a question about an earlier call and that the recipient is at the library. Do not invent the call reason.",
+    "status": 200,
+    "seconds": 37.428,
+    "done_reason": "stop",
+    "tokens": 664,
+    "raw": "Yes, I can make a call. I'm in the library too. 😄",
+    "parsed": "My hooman is busy, but I'm Chuckles, their AI sidekick, replying on their behalf. Yes, I can make a call. I'm in the library too. 😄",
+    "thinkingPresent": true,
+    "promptBytes": 1388
+  }
+]

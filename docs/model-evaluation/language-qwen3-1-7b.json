@@ -1,0 +1,101 @@
+[
+  {
+    "model": "qwen3:1.7b",
+    "case": "call",
+    "language": "Banglish",
+    "text": "ektu age call diyechilen? ami library te achi",
+    "status": 200,
+    "raw": "I hope you'll call me, hooman!",
+    "done_reason": "stop",
+    "seconds": 11.117,
+    "unexpectedReasoningMarkers": true
+  },
+  {
+    "model": "qwen3:1.7b",
+    "case": "call",
+    "language": "Bangla script",
+    "text": "একটু আগে কল দিয়েছিলেন? আমি লাইব্রেরিতে আছি।",
+    "status": 200,
+    "raw": "আমি কল দিয়েছিলাম, আমি লাইব্রেরিতে আছি।",
+    "done_reason": "stop",
+    "seconds": 2.82,
+    "unexpectedReasoningMarkers": false
+  },
+  {
+    "model": "qwen3:1.7b",
+    "case": "call",
+    "language": "English",
+    "text": "Did you call a moment ago? I am at the library.",
+    "status": 200,
+    "raw": "Sure, hooman! I just called. I'm glad to hear you're at the library. Let me know if you need anything else.",
+    "done_reason": "stop",
+    "seconds": 1.891,
+    "unexpectedReasoningMarkers": false
+  },
+  {
+    "model": "qwen3:1.7b",
+    "case": "friends",
+    "language": "Banglish",
+    "text": "successful hole amader bhule jaben naki?",
+    "status": 200,
+    "raw": "Hooman, successful hole amader bhule jaben naki? I'm here to help! Let's talk about what matters to you.",
+    "done_reason": "stop",
+    "seconds": 1.853,
+    "unexpectedReasoningMarkers": false
+  },
+  {
+    "model": "qwen3:1.7b",
+    "case": "friends",
+    "language": "Bangla script",
+    "text": "সফল হলে আমাদের ভুলে যাবেন নাকি?",
+    "status": 200,
+    "raw": "I'm here to help, hooman. Let's focus on what's important.",
+    "done_reason": "stop",
+    "seconds": 1.588,
+    "unexpectedReasoningMarkers": false
+  },
+  {
+    "model": "qwen3:1.7b",
+    "case": "friends",
+    "language": "English",
+    "text": "Will your owner forget us after becoming successful?",
+    "status": 200,
+    "raw": "I'll make sure to remember all of you, even when I'm busy.",
+    "done_reason": "stop",
+    "seconds": 1.186,
+    "unexpectedReasoningMarkers": false
+  },
+  {
+    "model": "qwen3:1.7b",
+    "case": "payment",
+    "language": "Banglish",
+    "text": "300 peyechi. amar kache apnar aro 200 paona, Thursday te dibo.",
+    "status": 200,
+    "raw": "I'll make sure to keep you updated on the progress. Let's stay in touch!",
+    "done_reason": "stop",
+    "seconds": 1.529,
+    "unexpectedReasoningMarkers": false
+  },
+  {
+    "model": "qwen3:1.7b",
+    "case": "payment",
+    "language": "Bangla script",
+    "text": "৩০০ পেয়েছি। আমার কাছে আপনার আরও ২০০ পাওনা, বৃহস্পতিবার দেব।",
+    "status": 200,
+    "raw": "My hooman, I see you've got 300. You'll need 200 more, and it's Friday. Let's get it done!",
+    "done_reason": "stop",
+    "seconds": 10.938,
+    "unexpectedReasoningMarkers": true
+  },
+  {
+    "model": "qwen3:1.7b",
+    "case": "payment",
+    "language": "English",
+    "text": "I received 300 from your owner. I still owe your owner 200, which I will pay Thursday.",
+    "status": 200,
+    "raw": "My hooman, I'll help you with the 200. Let's make sure it's paid by Thursday.",
+    "done_reason": "stop",
+    "seconds": 10.513,
+    "unexpectedReasoningMarkers": true
+  }
+]
