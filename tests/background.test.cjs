@@ -121,3 +121,59 @@ test("the worker sends actual recent messages as the model conversation", async 
   assert.deepEqual(body.messages.slice(1), messages.map(m => ({ role: m.role === "me" ? "assistant" : "user", content: m.text })));
   assert.equal(body.messages.at(-1).content, messages.at(-1).text);
 });
+test("the worker accepts twenty messages and rejects larger or malformed media contexts", async () => {
+  const h = harness(); await h.send({ type: "claim", token: "a" });
+  const messages = Array.from({ length: 20 }, (_, i) => ({ id: String(i), role: i % 2 ? "other" : "me", text: `Turn ${i}` }));
+  assert.equal((await h.send({ ...h.payload, messages })).ok, true);
+  assert.equal((await h.send({ ...h.payload, messages: [...messages, messages[0]] })).ok, false);
+  for (const media of [[{ kind: "image", label: "x", data: "https://example.com/private" }], [{ kind: "script", label: "x" }], [{ kind: "image", label: "x".repeat(501) }]]) {
+    assert.equal((await h.send({ ...h.payload, messages: [{ id: "invalid", role: "other", text: "", media }] })).ok, false);
+  }
+  assert.equal(h.requests(), 1);
+});
+test("saved attempt checks skip previous replies without inference", async () => {
+  const h = harness(); await h.send({ type: "claim", token: "a" });
+  assert.equal((await h.send({ ...h.payload, type: "attempted" })).attempted, false);
+  await h.send(h.payload);
+  assert.equal((await h.send({ ...h.payload, type: "attempted" })).attempted, true);
+  assert.equal(h.requests(), 1);
+});
+test("a reloaded document can reclaim its own tab without displacing another tab", async () => {
+  const h = harness();
+  await h.send({ type: "claim", token: "a" }, { ...h.sender, documentId: "old" });
+  assert.equal((await h.send({ type: "claim", token: "new" }, { ...h.sender, documentId: "new" })).ok, true);
+  assert.equal((await h.send({ type: "heartbeat", token: "a" }, { ...h.sender, documentId: "old" })).ok, false);
+  assert.equal((await h.send({ type: "claim", token: "other" }, { ...h.sender, tab: { id: 2 }, documentId: "another" })).ok, false);
+});
+test("wrong-language Banglish output is retried with strict guidance", async () => {
+  const bodies = [];
+  const h = harness(async (_url, options) => {
+    bodies.push(JSON.parse(options.body));
+    return { ok: true, json: async () => ({ message: { content: bodies.length === 1 ? "Your owner is busy right now." : "My hooman ekhon busy, bolo ki lagbe 😄" } }) };
+  });
+  await h.send({ type: "claim", token: "a" });
+  const result = await h.send({ ...h.payload, messages: [{ id: "banglish", role: "other", text: "ki korcho?" }] });
+  assert.equal(result.ok, true); assert.equal(h.requests(), 2);
+  assert.match(bodies[1].messages[0].content, /STRICT LANGUAGE CHECK/);
+  assert.ok(result.reply.startsWith(Core.introduction("Banglish")));
+});
+test("persistent wrong-language output is rejected rather than sent", async () => {
+  const h = harness(); await h.send({ type: "claim", token: "a" });
+  const result = await h.send({ ...h.payload, messages: [{ id: "banglish", role: "other", text: "tumi kemon acho?" }] });
+  assert.equal(result.ok, false); assert.match(result.error, /wrong language/); assert.equal(h.requests(), 2);
+});
+test("Ollama detects vision support and attaches pixels only for a vision model", async () => {
+  for (const vision of [true, false]) {
+    let body;
+    const h = harness(async (url, options) => {
+      if (url.endsWith("/api/show")) return { ok: true, json: async () => ({ capabilities: vision ? ["completion", "vision"] : ["completion"] }) };
+      body = JSON.parse(options.body);
+      return { ok: true, json: async () => ({ message: { content: "Nice photo!" } }) };
+    });
+    await h.send({ type: "claim", token: "a" });
+    const result = await h.send({ ...h.payload, messages: [{ id: "image", role: "other", text: "", media: [{ kind: "image", label: "photo", data: "data:image/jpeg;base64,aGVsbG8=" }] }] });
+    assert.equal(result.ok, true); assert.equal(h.requests(), 2);
+    assert.deepEqual(body.messages.at(-1).images, vision ? ["aGVsbG8="] : undefined);
+    assert.match(body.messages.at(-1).content, /\[image: photo\]/);
+  }
+});

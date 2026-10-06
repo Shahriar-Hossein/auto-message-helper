@@ -1,6 +1,6 @@
 # Teams Local Replies
 
-A Chrome/Edge extension that uses your local Qwen model to write short replies as **Chuckles**, your playful AI sidekick, in one selected Microsoft Teams chat. Controls live inside the Teams page, including an installed PWA, so a browser toolbar is unnecessary.
+A Chrome/Edge extension that uses Ollama or a local OpenAI-compatible model to reply as **Chuckles**, your playful AI sidekick, across unread Microsoft Teams direct chats. Controls live inside the Teams page, including an installed PWA, so a browser toolbar is unnecessary.
 
 The extension is implemented and tested against browser fixtures, including the title, sender placement, and Send control reported by your Teams PWA. **Live end-to-end operation has not been verified here.** Other Teams UI variants may need selector adjustments.
 
@@ -41,7 +41,7 @@ For a system service, configure its environment instead of starting a second ser
 Environment="OLLAMA_ORIGINS=chrome-extension://YOUR_EXTENSION_ID"
 ```
 
-Then apply it with `sudo systemctl daemon-reload` and `sudo systemctl restart ollama.service`. If `OLLAMA_ORIGINS` already allows other origins, preserve them and append this origin separated by a comma. Retry **Save & test model**, then **Generate now**. A model-ID error is separate: for example, `qwen2.5-coder:1.5b` and `qwen2.5:1.5b` are different model names, so use the exact entry from `ollama list`.
+Then apply it with `sudo systemctl daemon-reload` and `sudo systemctl restart ollama.service`. If `OLLAMA_ORIGINS` already allows other origins, preserve them and append this origin separated by a comma. Retry **Save & test model**, then **Generate & send**. A model-ID error is separate: for example, `qwen2.5-coder:1.5b` and `qwen2.5:1.5b` are different model names, so use the exact entry from `ollama list`.
 
 LM Studio uses `/v1/chat/completions`; enable its local server and select its actual model ID. [LM Studio chat completions](https://lmstudio.ai/docs/developer/openai-compat/chat-completions)
 
@@ -49,29 +49,34 @@ Only HTTP endpoints on `localhost` or `127.0.0.1` are accepted. Model requests r
 
 ## Use it
 
-1. Open the intended **one-to-one chat**, scroll to the bottom, and leave it open.
-2. Click **Select this chat**, then expand **Inspect loaded context**. Verify the person, order, and **Me** labels. The other sender's name must match the chat title. Groups and channels are excluded.
-3. Choose **Draft** and click **Start**. Existing messages establish a baseline. New incoming text triggers generation after a short wait for consecutive messages.
-4. Review/edit the reply, then choose **Insert draft**. Press Teams' own Send button. Monitoring waits while an unreviewed panel draft is present; insert or dismiss it to continue.
-5. Once extraction and replies work, pause, choose **Automatic send**, and start again. This mode inserts and clicks Teams Send after checking the chat, messages, and composer again.
+1. Configure your model and exact Teams display name in **Settings**.
+2. Choose **Automatic send** and **All unread direct chats**, then click **Start** once. These are the defaults.
+3. Leave Teams open. The extension watches the current conversation and visible unread sidebar entries, opens unread chats one at a time, confirms the recipient, reads up to the latest **20 messages**, and sends the reply.
+4. Monitoring resumes after reloading or reopening Teams, including checking the open conversation for an unhandled incoming message. **Pause** saves monitoring as off. Only one Teams window in the browser profile controls replies.
 
-**Generate now** drafts a reply to the latest incoming message, including one already present at startup or a previously failed attempt. It always creates a reviewable draft, even when Automatic send is selected. If the latest message is yours, it waits for an incoming message.
+Use **Selected chat only** to restrict monitoring to one person: open that chat, click **Select this chat**, inspect sender labels, and start. Resuming this mode requires the same conversation. Groups and channels are excluded. First Start establishes a baseline in the open chat; unread conversations are processed. Reload resumes unhandled incoming messages, with saved attempt hashes preventing repeat automatic attempts.
 
-While generating, the panel shows how many loaded messages it read and refreshes **Inspect loaded context** with those messages. The model receives them as conversation turns, with your earlier replies and the other person's messages assigned distinct roles, and is instructed to answer the latest message directly in its language.
+**Generate & send** always inserts and sends, even if incoming-message monitoring is set to Draft. **Preview reply** creates a reviewable panel draft. **Send reply** sends that existing draft without generating it again. It explicitly allows retrying an earlier attempt. If the latest message is yours, it waits for an incoming message. Use **Send reply** to send a panel preview, or **Insert draft** followed by Teams' Send button; monitoring waits until you insert or dismiss the panel draft.
 
-Chuckles speaks on your behalf and always calls you **my hooman**. Every generated reply starts with **“My hooman is busy, but I'm Chuckles, their AI sidekick, replying on their behalf.”** The extension adds this introduction so the recipient can identify the AI helper even if the model forgets. The rest responds to the actual conversation with light humor, becoming sincere for serious topics. For a friend's “don't forget me when u get rich,” an example reply is:
+The extension fetches earlier virtualized messages with bounded scroll attempts when fewer than 20 are loaded, then returns to the latest message. It may receive fewer than 20 if history is unavailable. During generation, **Inspect loaded context** shows the actual recent context. Sender roles remain distinct and messages stay in chronological order. Long turns may be shortened to fit the model budget.
 
-> My hooman is busy, but I'm Chuckles, their AI sidekick, replying on their behalf. Worried about being forgotten when my hooman gets rich? Relax, my hooman is a good person who never forgets friends, even with a fancy wallet 😄
+Chuckles matches the latest recipient's language, spelling style, and tone. Banglish means Bangla written in Latin letters; older English replies do not select English for a new Banglish message. A Banglish reply starts with:
 
-The model is given your reassurance that your hooman is a good person who never forgets friends; it is instructed to avoid inventing financial success, gifts, deals, or commitments. Change **Settings → Chuckles' style and your known facts** to adjust the tone. The original default style updates automatically; custom styles remain saved. Example wording varies with your local model, and you can edit the panel draft before inserting it.
+> My hooman ekhon busy, ami Chuckles, tar AI sidekick hoye reply dicchi.
 
-**Insert draft** uses the editor's plain-text paste handling when available, or a native editing command with the caret explicitly placed in the composer. It waits for Teams to process the edit before clearing the panel draft. If Teams removes or changes the inserted text, the panel retains the reply and reports the failure so you can copy it manually. This follows [CKEditor's clipboard pipeline](https://ckeditor.com/docs/ckeditor5/latest/framework/deep-dive/clipboard.html); the actual Teams editor still needs live verification.
+English and Bangla messages receive disclosures in their corresponding language. The prompt encourages one or two relevant emojis, with sincere replies for serious topics. If a detected Banglish message gets an English or Bangla-script response, the extension retries inference once with stricter language guidance; continued mismatch is reported without sending. Detection uses common Banglish words, so unfamiliar spellings can still need a better model or an adjusted style preference. **Settings → Chuckles' style and your known facts** retains your custom preferences.
 
-**Pause** stops monitoring and discards in-flight results. It does not remove text already inserted in Teams. Switching chats or changing settings pauses operation. Reloading Teams starts paused and requires selecting the chat again. Only one window in this browser profile can control replies; an abandoned controller lease expires after 45 seconds.
+Images, GIFs, and media-only messages count in the 20-message window. Captions and attachment labels are included. In **Image understanding → Detect automatically**, Ollama's `/api/show` capabilities determine whether actual image pixels can be attached. A text-only model receives captions and is told not to pretend it saw the media. GIFs and supported video previews supply one still frame. OpenAI-compatible servers require explicitly choosing **Enabled — vision model**. See [Ollama vision inputs](https://docs.ollama.com/capabilities/vision).
+
+Loaded previews are resized to at most 384 pixels per side, with a maximum of 20 encoded images and 2 MB total across the context; remaining media retain captions. Images that the browser cannot read, including restricted cross-origin previews or unloaded media, also retain captions. The extension does not download attachment files. It replies with text and emojis, not outgoing GIFs or images.
+
+Insertion uses the editor's plain-text paste handling or a native editing command with the caret in the composer. It verifies that Teams retained the text, then waits up to two seconds for the actual Send button to become enabled. It clicks Send once and observes a matching new outgoing message. Existing composer text and attachments are preserved; automatic monitoring waits while you type or read older history. In-flight replies are discarded if the conversation changes or you type.
+
+Reload the extension in `chrome://extensions` or `edge://extensions`, then reload Teams to apply updates. The panel should show **v0.2.1** and **Generate & send**. Old saved monitoring modes switch to Automatic send once on this upgrade; selecting Draft and pressing Start in this version preserves that explicit choice. Old 5- or 10-message defaults migrate to 20; your model, display name, and custom style remain saved.
 
 ## If selectors differ
 
-The panel reports when it cannot identify a title, message, sender, ID, scroller, composer, or Send button. Failed selection automatically opens a page check and keeps Start/Generate disabled so a later click cannot hide the original error. You can also click **Check Teams page → Copy page check** and share the report here to diagnose your PWA's selectors. The report contains selector counts and DOM metadata, without message text, chat names, message/chat IDs, or model settings.
+If automatic insertion or sending fails, the reply stays in the panel, the status explains that sending stopped, and a page check opens automatically for copying. The panel reports when it cannot identify a title, message, sender, ID, scroller, composer, or Send button. Failed selection automatically opens a page check and keeps Start/Generate disabled so a later click cannot hide the original error. You can also click **Check Teams page → Copy page check** and share the report here to diagnose your PWA's selectors. The report contains selector counts and DOM metadata, without message text, chat names, message/chat IDs, or model settings.
 
 In **Settings → Teams selectors**, update the JSON CSS selectors using the PWA's DevTools. Save, select the chat again, and inspect the context. After updating extension files, reload the extension from `chrome://extensions` or `edge://extensions`, then reload the PWA; reloading only Teams does not necessarily pick up extension updates.
 
@@ -84,27 +89,29 @@ In **Settings → Teams selectors**, update the JSON CSS selectors using the PWA
 | `composer` | One visible Teams `contenteditable` input |
 | `send` | One visible Teams Send button |
 | `scroller` | The actual scrolling viewport containing the message rows |
+| `chatItem` | Visible sidebar chat entries; used to open unread conversations |
+| `unread` | Unread attributes or indicators on or inside each sidebar entry |
 | `identity` | An element for the **current chat** carrying `data-chat-id`, `data-conversation-id`, or `data-thread-id` |
 
-A row explicitly marked `data-is-own-message="true"` can identify your own messages without a name. Other missing authors stop generation; a message never inherits the preceding row's sender. Attachment-only rows are skipped.
+A row explicitly marked `data-is-own-message="true"` can identify your own messages without a name. Other missing authors stop generation; a message never inherits the preceding row's sender. Media-only rows are included when an image, GIF, or supported attachment preview is present.
 
 A conversation key can come from the title's ancestors or a Teams URL containing a `19:` chat ID. In the personal-account UI, exactly one `participant-` key inside `chat-title` can identify the selected recipient instead. Multiple participant keys are rejected. **Automatic sending requires a stable conversation key.** Without one, draft mode can bind to the displayed title; inspect the person carefully, since names are not unique. Do not invent a fixed ID or select unrelated sidebar items to bypass this check.
 
 Saved original default selectors migrate automatically to newer defaults when the extension loads; custom selectors, model settings, and your display name are preserved. Reload the extension and PWA to apply updates; there is no need to reset your settings.
 
-Virtualized lists may expose fewer than five messages. The extension uses only loaded text and does not scroll to fetch history. Scrolling away from the bottom pauses monitoring.
+Virtualized history is loaded with up to eight scroll attempts. If Teams cannot expose 20 messages, the available history is used. Automatic monitoring waits when you scroll away from the bottom.
 
 ## Behavior and limits
 
-- Uses the latest 5–10 loaded text messages, oldest to newest, labeled as you and the other person.
-- Applies a character budget and a conservative 3,500-byte serialized prompt budget, reserving room for formatting and 128 output tokens in Qwen's 4,096-token context. Long messages/preferences may be shortened. Other model/tokenizer limits depend on your server.
-- Generates one reply at a time, preserves existing composer drafts/attachments, and discards stale responses when messages change or you type during generation.
-- Reserves hashed attempt keys before inference. Failed or uncertain attempts are not automatically retried; **Generate now** explicitly retries as a draft.
-- After automatic Send, looks for a new matching outgoing message. If none appears within 12 seconds, pauses with uncertain delivery. This DOM observation is not a server delivery receipt; check Teams before trying again.
-- Aborts inference after 25 seconds, below the worker's fetch-response timeout. Warm up slow models first. [Chrome worker lifecycle](https://developer.chrome.com/docs/extensions/develop/concepts/service-workers/lifecycle)
-- Watches only the selected open chat. Closing the PWA stops operation. Browser throttling/suspension and Teams UI changes can delay or prevent replies.
+- Uses up to the latest 20 messages, including media-only turns, oldest to newest.
+- Applies a context character budget and a 12,000-byte serialized text prompt budget. Ollama requests 16,384 context tokens and 256 output tokens. Image data is budgeted separately; actual model limits and memory usage vary.
+- Generates one reply at a time and checks chat identity, message freshness, composer text, and user activity before sending.
+- Saves only hashed attempt keys for up to 500 recent attempts. Failed or uncertain automatic attempts are not retried; **Generate & send** explicitly retries. In all-chat mode, a failed generation leaves monitoring enabled for future incoming messages.
+- After Send, looks for a matching new outgoing message. If none appears within 12 seconds, it stops with uncertain delivery. This is a DOM observation, not a server delivery receipt; check Teams before retrying.
+- The model request has a shared 25-second timeout, including image capability detection and any language correction. Warm up slow models first.
+- Requires Teams to remain open in the browser/PWA and the unread sidebar entries to be loaded. Closing Teams stops execution; saved monitoring resumes on reopening. Browser suspension, hidden/sidebar virtualization, and Teams UI changes can delay detection. Native Teams desktop is unsupported.
 
-Settings use local extension storage. Chat context and replies stay in memory; session storage holds only hashed attempt keys and controller coordination. Inference goes to your loopback server; sending still uses Teams. Your server may have its own logging. No telemetry or Microsoft Graph registration is included.
+Settings, monitoring preferences, and hashed attempt keys use local extension storage. Chat text, encoded previews, and replies stay in memory; session storage holds only controller coordination. Inference goes to your configured loopback server; sending uses Teams. Your server may have its own logging. No telemetry or Microsoft Graph registration is included.
 
 ## Development
 
@@ -119,4 +126,4 @@ Tests cover prompt bounds, endpoint restrictions, freshness, worker sender valid
 
 Tests do not sign in to Teams or contact your model. The original architecture plan is preserved in [docs/design.md](docs/design.md).
 
-For actual reply quality, see the [local and cloud model comparison](docs/model-response-evaluation.md), including recorded API replies and tested prompts. The standalone `tools/compare-responses.cjs` runner tests fictional conversations through Ollama; it runs separately from `npm test` and does not change extension settings. For example, `node tools/compare-responses.cjs gemma4:31b-cloud refined` repeats the strongest tested combination. A `-cloud` model sends those fictional samples to Ollama Cloud.
+For actual reply quality, see the [local and cloud model comparison](docs/model-response-evaluation.md), including recorded API replies and tested prompts from the earlier version; these benchmarks have not been rerun for the current prompt. The standalone `tools/compare-responses.cjs` runner tests fictional conversations through Ollama; it runs separately from `npm test` and does not change extension settings. For example, `node tools/compare-responses.cjs gemma4:31b-cloud refined` repeats the strongest tested combination. A `-cloud` model sends those fictional samples to Ollama Cloud.

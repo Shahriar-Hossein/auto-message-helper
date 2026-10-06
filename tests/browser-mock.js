@@ -1,5 +1,5 @@
 "use strict";
-window.testState = { intervals: [], requests: [], sendCount: 0, now: 100000, response: null, shadow: null, changeListeners: [] };
+window.testState = { intervals: [], requests: [], sendCount: 0, now: 100000, response: null, shadow: null, changeListeners: [], monitor: null };
 const originalAttachShadow = Element.prototype.attachShadow;
 Element.prototype.attachShadow = function (options) {
   const shadow = originalAttachShadow.call(this, options);
@@ -10,7 +10,10 @@ window.setInterval = callback => { testState.intervals.push(callback); return te
 Date.now = () => testState.now;
 testState.config = TeamsReplyCore.settings({ selfName: "Me", debounceMs: 1000 });
 window.chrome = {
-  storage: { local: { get: async () => ({ config: testState.config }) }, onChanged: { addListener: fn => testState.changeListeners.push(fn) } },
+  storage: { local: {
+    get: async key => key === "monitor" ? { monitor: testState.monitor } : { config: testState.config },
+    set: async values => { if (values.monitor) testState.monitor = structuredClone(values.monitor); }
+  }, onChanged: { addListener: fn => testState.changeListeners.push(fn) } },
   runtime: { sendMessage: async message => {
     testState.requests.push(message);
     if (message.type === "generate") return testState.response ? testState.response(message) : { ok: true, reply: "Sounds good!" };
@@ -19,6 +22,7 @@ window.chrome = {
 };
 document.querySelector('[data-tid="send-message"]').addEventListener("click", () => {
   testState.sendCount++;
+  if (testState.suppressEcho) { document.querySelector('[data-tid="ckeditor"]').textContent = ""; return; }
   const row = document.createElement("div");
   row.dataset.tid = "chat-pane-message"; row.dataset.messageId = `outgoing-${testState.sendCount}`;
   const author = document.createElement("b"); author.dataset.tid = "message-author-name"; author.textContent = "Me";

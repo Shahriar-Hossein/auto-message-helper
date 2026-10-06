@@ -20,16 +20,17 @@
     details{margin-top:10px}pre{white-space:pre-wrap;max-height:180px;overflow:auto;background:#151827;padding:8px;border-radius:7px}
     [hidden]{display:none!important}small{color:#b8bfd7}
   </style><section aria-label="Teams Local Replies">
-    <header><strong>Local Replies</strong><button id="collapse" aria-label="Collapse panel">−</button></header>
+    <header><strong>Local Replies <small>v0.2.1</small></strong><button id="collapse" aria-label="Collapse panel">−</button></header>
     <div id="controls">
       <p id="selected">No chat selected</p><p id="status" role="status">Paused. Open Settings to configure your model and name.</p>
       <div class="row"><button id="settings">Settings</button><button class="primary" id="select">Select this chat</button><button id="diagnose">Check Teams page</button></div>
-      <label>Reply mode <select id="mode"><option value="draft">Draft</option><option value="auto">Automatic send</option></select></label>
-      <div class="row"><button class="primary" id="start" disabled>Start</button><button class="pause" id="pause" disabled>Pause</button><button id="generate" disabled>Generate now</button></div>
+      <label>New incoming messages <select id="mode"><option value="auto">Automatic send</option><option value="draft">Draft</option></select></label>
+      <label>Watch <select id="scope"><option value="all">All unread direct chats</option><option value="selected">Selected chat only</option></select></label>
+      <div class="row"><button class="primary" id="start">Start</button><button class="pause" id="pause" disabled>Pause</button><button id="generate" disabled>Generate &amp; send</button><button id="preview" disabled>Preview reply</button></div>
       <textarea id="draft" aria-label="Generated reply" placeholder="Your generated reply appears here. You can edit it before inserting."></textarea>
-      <div class="row"><button id="insert" disabled>Insert draft</button><button id="dismiss">Dismiss</button></div>
+      <div class="row"><button class="primary" id="send" disabled>Send reply</button><button id="insert" disabled>Insert draft</button><button id="dismiss">Dismiss</button></div>
       <details id="inspection"><summary>Inspect loaded context / page check</summary><div class="row"><button id="inspect">Refresh context</button><button id="copy-report" hidden>Copy page check</button></div><pre id="context">Select a chat to inspect its recent messages.</pre></details>
-      <small>Keep the selected chat open at the bottom. Start establishes a baseline; only new incoming messages trigger replies.</small>
+      <small>Start once to keep replies enabled across reloads. Keep Teams open. Unread direct chats open automatically; Pause turns monitoring off.</small>
     </div>
   </section>`;
   document.body.append(host);
@@ -37,8 +38,17 @@
   const status = message => { $("status").textContent = message; };
   let pageReport = "";
   let config, selected = null, running = false, busy = false, epoch = 0, baseline = "", due = 0;
-  let draftSnapshot = null, pendingDelivery = null, userRevision = 0, selectedMode = "draft";
-  let inserting = false;
+  let draftSnapshot = null, pendingDelivery = null, userRevision = 0, selectedMode = "auto";
+  let inserting = false, navigating = false, monitor = Core.monitorSettings();
+  let resumePending = false, resumeDue = 0;
+  const unreadSeen = new Set();
+  const marks = new Map();
+  async function saveMonitor() { await chrome.storage.local.set({ monitor }); }
+  function bind(snapshot) {
+    selected = snapshot;
+    $("selected").textContent = `Selected: ${snapshot.title}`;
+    $("generate").disabled = false; $("preview").disabled = false;
+  }
   const token = crypto.randomUUID();
   async function request(message) {
     const response = await chrome.runtime.sendMessage({ ...message, token });
@@ -49,18 +59,20 @@
     const { config: raw } = await chrome.storage.local.get("config");
     config = Core.settings(raw);
   }
-  function pause(message = "Paused.") {
+  function pause(message = "Paused.", disable = false) {
     running = false; epoch++; due = 0;
-    $("start").disabled = !selected; $("pause").disabled = true; $("mode").disabled = false;
+    if (pendingDelivery) pendingDelivery.waiting = false;
+    if (disable) { resumePending = false; monitor = { ...monitor, enabled: false }; void saveMonitor().catch(error => status(error.message)); }
+    $("start").disabled = $("scope").value === "selected" && !selected; $("pause").disabled = !monitor.enabled; $("mode").disabled = false; $("scope").disabled = false;
     status(message);
     void request({ type: "release" }).catch(() => {});
   }
   function clearDraft() {
-    $("draft").value = ""; draftSnapshot = null; $("insert").disabled = true;
+    $("draft").value = ""; draftSnapshot = null; $("insert").disabled = true; $("send").disabled = true;
   }
-  function insertReply(reply) {
+  async function insertReply(reply) {
     inserting = true;
-    try { return Teams.insert(config, reply); }
+    try { return await Teams.insert(config, reply); }
     finally { inserting = false; }
   }
   function current() {
@@ -73,18 +85,42 @@
   function inspect(snapshot) {
     $("copy-report").hidden = true;
     $("context").textContent = `${snapshot.title}\nConversation key: ${snapshot.chatId || "not available (automatic sending disabled)"}\n\n` +
-      snapshot.messages.map(m => `${m.role === "me" ? "Me" : m.author}: ${m.text}`).join("\n\n");
+      snapshot.messages.map(m => `${m.role === "me" ? "Me" : m.author}: ${m.text}${(m.media || []).map(item => ` [${item.kind}: ${item.label}]`).join("")}`).join("\n\n");
   }
   function showPageCheck(error) {
     pageReport = (error ? `Selection failed: ${error.message}\n\n` : "") + Teams.diagnostics(config);
     $("context").textContent = pageReport;
     $("inspection").open = true; $("copy-report").hidden = false;
   }
-  async function generate(manual = false) {
+  function keepDraft(snapshot, reply) {
+    $("draft").value = reply; draftSnapshot = snapshot;
+    $("insert").disabled = false; $("send").disabled = false;
+  }
+  async function deliver(snapshot, reply, version, revision, manual) {
+    const fresh = () => version === epoch && (manual || running) && revision === userRevision && Core.isFresh(snapshot, current());
+    try {
+      if (!fresh()) throw new Error("The conversation changed before insertion. Generate a new reply.");
+      status("Inserting reply into Teams…");
+      await insertReply(reply);
+      if (!fresh()) throw new Error("The conversation changed after insertion. Review the unsent composer draft.");
+      await request({ type: "heartbeat" });
+      if (!fresh()) throw new Error("Sending was cancelled. Review the composer draft.");
+      status("Sending reply through Teams…");
+      await Teams.send(config, reply, fresh);
+      pendingDelivery = { reply, waiting: true, started: Date.now(), snapshot };
+      clearDraft();
+      status("Send clicked. Waiting for the outgoing message…");
+    } catch (error) {
+      if (version === epoch) { keepDraft(snapshot, reply); showPageCheck(error); }
+      throw new Error(`Automatic send stopped: ${error.message}`);
+    }
+  }
+  async function generate(manual = false, replyMode = selectedMode) {
     if (busy) throw new Error("A reply is already being generated.");
     if ($("draft").value.trim()) throw new Error("Insert or dismiss the existing draft before generating another reply.");
-    const snapshot = current();
-    if (snapshot.messages.at(-1).role !== "other") throw new Error("The latest text message is yours. Waiting for the other person.");
+    let snapshot = current();
+    if (replyMode === "auto" && !snapshot.chatId) throw new Error("Automatic sending requires a stable conversation identity.");
+    if (snapshot.messages.at(-1).role !== "other") throw new Error("The latest message is yours. Waiting for the other person.");
     if (!Teams.composerEmpty(config)) throw new Error("Your composer contains a draft or attachment. It was preserved.");
     const version = epoch, revision = userRevision;
     busy = true;
@@ -94,43 +130,32 @@
     try {
       await request({ type: "claim" });
       if (version !== epoch) return;
-      if (!Core.isFresh(snapshot, current()) || revision !== userRevision || !Teams.composerEmpty(config)) {
+      const history = await Teams.recentHistory(config, () => version === epoch && revision === userRevision);
+      snapshot = current();
+      const lastContext = history.at(-1), lastLoaded = snapshot.messages.at(-1);
+      if (lastContext?.id !== lastLoaded?.id || lastContext?.text !== lastLoaded?.text ||
+          !Core.isFresh(snapshot, current()) || revision !== userRevision || !Teams.composerEmpty(config)) {
         status("Conversation changed before generation. Try again when it settles."); return;
       }
+      inspect({ ...snapshot, messages: history });
+      status(`Generating locally from ${history.length} recent messages, including media…`);
       const { reply } = await request({ type: "generate", identity: snapshot.identity,
-        messages: snapshot.messages.map(({ id, text, role }) => ({ id, text: text.slice(0, config.maxContextChars), role })), manual });
+        messages: history.map(({ id, text, role, media }) => ({ id, text: text.slice(0, config.maxContextChars), role, ...(media?.length ? { media } : {}) })), manual });
       if (version !== epoch) return;
       const latest = current();
       if (!Core.isFresh(snapshot, latest) || revision !== userRevision || !Teams.composerEmpty(config)) {
         status("Discarded the reply because the conversation or composer changed."); return;
       }
-      if (!manual && running && selectedMode === "auto") {
-        // Revalidate after Teams has processed editor changes and enabled its Send button.
-        try { await insertReply(reply); }
-        catch (error) {
-          if (version === epoch) {
-            $("draft").value = reply; draftSnapshot = snapshot; $("insert").disabled = false;
-          }
-          throw error;
-        }
-        if (version !== epoch || !running || revision !== userRevision || !Core.isFresh(snapshot, current())) {
-          throw new Error("The conversation changed after insertion. Review the unsent composer draft.");
-        }
-        await request({ type: "heartbeat" });
-        if (version !== epoch || !running || revision !== userRevision || !Core.isFresh(snapshot, current())) {
-          throw new Error("Sending was cancelled. Review the composer draft.");
-        }
-        Teams.send(config, reply);
-        pendingDelivery = { reply, started: Date.now(), snapshot };
-        status("Send clicked. Waiting for the outgoing message…");
+      if (replyMode === "auto" && (manual || running)) {
+        await deliver(snapshot, reply, version, revision, manual);
       } else {
-        $("draft").value = reply; draftSnapshot = snapshot; $("insert").disabled = false;
-        status(manual ? "Draft ready. Review it, then insert it into Teams." : "Draft ready. Monitoring waits until you insert or dismiss it.");
+        keepDraft(snapshot, reply);
+        status("Preview ready (draft mode). Use Send reply to send it, or Insert draft to edit it in Teams.");
       }
     } finally {
       busy = false;
-      if (!running) {
-        $("pause").disabled = true; $("start").disabled = !selected;
+      if (!running && !pendingDelivery) {
+        $("pause").disabled = !monitor.enabled; $("start").disabled = false;
         void request({ type: "release" }).catch(() => {});
       }
     }
@@ -141,13 +166,14 @@
       if ((id === "select" || id === "inspect") && config) showPageCheck(error);
     }));
   }
+  $("scope").addEventListener("change", () => { $("start").disabled = $("scope").value === "selected" && !selected; });
   act("settings", () => request({ type: "settings" }));
   act("select", async () => {
-    selected = null; $("selected").textContent = "No chat selected"; $("generate").disabled = true;
+    selected = null; $("selected").textContent = "No chat selected"; $("generate").disabled = true; $("preview").disabled = true;
     pause(); clearDraft(); pendingDelivery = null;
     await loadConfig();
     selected = Teams.snapshot(config);
-    $("start").disabled = false; $("generate").disabled = false;
+    $("start").disabled = false; $("generate").disabled = false; $("preview").disabled = false;
     $("selected").textContent = `Selected: ${selected.title}`;
     inspect(selected);
     status("Chat selected. Check the sender labels in Inspect loaded context before starting.");
@@ -161,25 +187,62 @@
     status("Page check copied. Paste it into the chat with Codex.");
   });
   act("inspect", () => inspect(Teams.snapshot(config)));
-  act("start", async () => {
+  async function start(resuming = false) {
     if (busy) throw new Error("Wait for the current generation to finish.");
+    if (!config.selfName) throw new Error("Set your exact Teams display name in Settings first.");
+    selectedMode = resuming ? monitor.mode : $("mode").value;
+    const scope = resuming ? monitor.scope : $("scope").value;
     const version = epoch;
-    const snapshot = current();
-    selectedMode = $("mode").value;
-    if (selectedMode === "auto" && !snapshot.chatId) throw new Error("Automatic sending requires a stable conversation identity (chat ID or one-to-one participant ID). Draft mode is available.");
     if (pendingDelivery) throw new Error("Previous delivery is uncertain. Check the conversation, then select the chat again.");
-    if (!Teams.composerEmpty(config)) throw new Error("Clear or send your existing Teams draft before starting.");
+    let snapshot;
+    if (resuming && scope === "selected" && !selected) {
+      const opened = Teams.snapshot(config);
+      if (opened.identity !== monitor.identity) throw new Error("Open the previously selected chat or choose All unread direct chats and press Start.");
+      bind(opened);
+    }
+    try { snapshot = scope === "selected" ? current() : Teams.snapshot(config); }
+    catch (error) { if (scope === "selected") throw error; }
+    if (snapshot) {
+      if (selectedMode === "auto" && !snapshot.chatId && scope === "selected") throw new Error("Automatic sending requires a stable conversation identity (chat ID or one-to-one participant ID). Draft mode is available.");
+      if (scope === "selected" && !Teams.composerEmpty(config)) throw new Error("Clear or send your existing Teams draft before starting.");
+    }
     await request({ type: "claim" });
     if (version !== epoch) { void request({ type: "release" }).catch(() => {}); return; }
-    if (Core.fingerprint(snapshot) !== Core.fingerprint(current())) {
-      throw new Error("The conversation changed while starting. Press Start again.");
+    if (snapshot && Core.fingerprint(snapshot) !== Core.fingerprint(Teams.snapshot(config))) throw new Error("The conversation changed while starting. Press Start again.");
+    monitor = { enabled: true, mode: selectedMode, scope, replyModeVersion: 3, ...(scope === "selected" && snapshot ? { identity: snapshot.identity } : {}) };
+    await saveMonitor();
+    if (version !== epoch) return;
+    running = true; resumePending = false; epoch++; due = 0;
+    if (snapshot) {
+      bind(snapshot); baseline = Core.fingerprint(snapshot); marks.set(snapshot.identity, baseline);
+      if (resuming && snapshot.atBottom && snapshot.messages.at(-1)?.role === "other") due = Date.now() + config.debounceMs;
     }
-    running = true; epoch++; baseline = Core.fingerprint(snapshot); due = 0;
-    $("start").disabled = true; $("pause").disabled = false; $("mode").disabled = true;
-    status(`Watching for new messages (${selectedMode === "auto" ? "automatic send" : "draft mode"}).`);
+    $("mode").value = selectedMode; $("scope").value = scope;
+    $("start").disabled = true; $("pause").disabled = false; $("mode").disabled = true; $("scope").disabled = true;
+    status(`Watching ${scope === "all" ? "all unread direct chats" : "this chat"} (${selectedMode === "auto" ? "automatic send" : "draft mode"}). Enabled across reloads.`);
+  }
+  act("start", () => start());
+  act("pause", () => pause("Paused. Automatic monitoring is off until you press Start.", true));
+  act("generate", () => generate(true, "auto"));
+  act("preview", () => generate(true, "draft"));
+  act("send", async () => {
+    if (busy) throw new Error("Wait for the current reply operation to finish.");
+    if (pendingDelivery) throw new Error("Check the previous delivery before sending another reply.");
+    const snapshot = draftSnapshot, reply = $("draft").value.trim();
+    if (!snapshot || !Core.isFresh(snapshot, current())) throw new Error("This draft is stale. Dismiss it and generate a new one.");
+    if (!snapshot.chatId) throw new Error("Automatic sending requires a stable conversation identity.");
+    if (!reply) throw new Error("The draft is empty.");
+    const version = epoch, revision = userRevision;
+    busy = true;
+    try {
+      await request({ type: "claim" });
+      if (version !== epoch) return;
+      await deliver(snapshot, reply, version, revision, true);
+    } finally {
+      busy = false;
+      if (!running && !pendingDelivery) void request({ type: "release" }).catch(() => {});
+    }
   });
-  act("pause", () => pause());
-  act("generate", () => generate(true));
   act("insert", async () => {
     if (!draftSnapshot || !Core.isFresh(draftSnapshot, current())) throw new Error("This draft is stale. Dismiss it and generate a new one.");
     const snapshot = draftSnapshot, reply = $("draft").value.trim(), version = epoch;
@@ -204,43 +267,122 @@
   document.addEventListener("keydown", event => {
     if (event.isTrusted && event.target?.isContentEditable) userRevision++;
   }, true);
-  chrome.storage.onChanged.addListener((_changes, area) => {
-    if (area === "local") {
-      selected = null; $("generate").disabled = true;
-      pause("Settings changed. Select the chat again."); clearDraft(); $("selected").textContent = "No chat selected";
+  chrome.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local") return;
+    if (changes.monitor?.newValue) {
+      monitor = Core.monitorSettings(changes.monitor.newValue);
+      if (!monitor.enabled && running) pause("Monitoring was turned off in another Teams window.");
+    }
+    if (changes.config) {
+      selected = null; $("generate").disabled = true; $("preview").disabled = true;
+      pause("Settings changed. Reloading configuration…"); clearDraft(); $("selected").textContent = "No chat selected";
+      resumePending = monitor.enabled;
+      void loadConfig().then(() => { if (monitor.enabled) return start(true); }).catch(error => status(error.message));
     }
   });
+  async function navigateUnread() {
+    const unread = Teams.unreadChats(config);
+    const keys = new Set(unread.map(item => item.key));
+    for (const key of unreadSeen) if (!keys.has(key)) unreadSeen.delete(key);
+    const target = unread.find(item => !unreadSeen.has(item.key) && item.id !== selected?.chatId && item.title !== selected?.title);
+    if (!target) return false;
+    if (busy || pendingDelivery || $("draft").value.trim()) return false;
+    const version = epoch, revision = userRevision;
+    try { if (!Teams.composerEmpty(config)) { status("Watching; waiting for your existing Teams draft to be cleared."); return false; } }
+    catch { /* Teams may have no open conversation yet. */ }
+    navigating = true; unreadSeen.add(target.key);
+    status(`Opening unread chat from ${target.title}…`);
+    try {
+      const opened = await Teams.openUnread(config, target, () => running && version === epoch && revision === userRevision);
+      if (version !== epoch || !running) return false;
+      if (!opened.chatId && selectedMode === "auto") { status("Skipped an unread chat without a stable conversation identity."); return false; }
+      bind(opened); baseline = Core.fingerprint(opened); marks.set(opened.identity, baseline);
+      due = opened.messages.at(-1)?.role === "other" ? Date.now() + config.debounceMs : 0;
+      inspect(opened); return true;
+    } catch (error) {
+      if (version === epoch && running) status(`Skipped unread chat: ${error.message}`);
+      return false;
+    } finally { navigating = false; }
+  }
   let ticking = false;
   setInterval(async () => {
-    if ((!running && !busy) || ticking) return;
+    if (resumePending && !running && !busy && !ticking && Date.now() >= resumeDue) {
+      resumeDue = Date.now() + 5000;
+      try { await start(true); } catch (error) { status(`Waiting to resume: ${error.message}`); }
+    }
+    if ((!running && !pendingDelivery?.waiting) || busy || ticking || navigating) return;
     ticking = true;
     try {
       await request({ type: "heartbeat" });
-      if (!running) return;
-      const snapshot = current();
+      if (busy || !running && !pendingDelivery) return;
+      let snapshot;
+      if (running && monitor.scope === "all" && !pendingDelivery && !busy) {
+        try { snapshot = Teams.snapshot(config); }
+        catch {
+          selected = null; $("generate").disabled = true; $("preview").disabled = true; $("selected").textContent = "Waiting for an unread direct chat";
+          await navigateUnread(); return;
+        }
+        if (!selected || snapshot.identity !== selected.identity) {
+          bind(snapshot); baseline = marks.get(snapshot.identity) || Core.fingerprint(snapshot);
+          due = snapshot.messages.at(-1)?.role === "other" ? Date.now() + config.debounceMs : 0;
+        }
+        // Keep monitoring while the user reads older history or types a draft.
+        if (!snapshot.atBottom || !Teams.composerEmpty(config)) return;
+        if (selectedMode === "auto" && !snapshot.chatId) { status("Waiting for a direct chat with a stable conversation identity."); await navigateUnread(); return; }
+      } else snapshot = current();
       if (pendingDelivery) {
         const delivered = snapshot.messages.some(m => m.role === "me" &&
           !pendingDelivery.snapshot.messages.some(old => old.id === m.id) && Core.normalize(m.text) === Core.normalize(pendingDelivery.reply));
         if (delivered) {
-          pendingDelivery = null; baseline = Core.fingerprint(snapshot);
+          pendingDelivery = null; baseline = Core.fingerprint(snapshot); marks.set(snapshot.identity, baseline);
           due = snapshot.messages.at(-1).role === "other" ? Date.now() + config.debounceMs : 0;
-          status("Reply appeared in the conversation. Watching for new messages.");
+          if (!running) pause("Reply appeared in the conversation.");
+          else status("Reply appeared in the conversation. Watching for new messages.");
         }
         else if (Date.now() - pendingDelivery.started > 12000) pause("Delivery is uncertain. Check Teams before selecting the chat again. No retry was made.");
         return;
       }
       const mark = Core.fingerprint(snapshot);
       if (mark !== baseline) {
-        baseline = mark;
+        baseline = mark; marks.set(snapshot.identity, mark);
         due = snapshot.messages.at(-1).role === "other" ? Date.now() + config.debounceMs : 0;
+      }
+      if (!due && running && monitor.scope === "all" && !$("draft").value.trim()) {
+        if (await navigateUnread()) return;
       }
       if (due && Date.now() >= due && !busy && !$("draft").value.trim()) {
         due = 0;
-        await generate();
+        const probe = await request({ type: "attempted", identity: snapshot.identity,
+          messages: snapshot.messages.map(({ id, text, role }) => ({ id, text, role })) });
+        if (!probe.attempted) await generate();
+        else status("Latest incoming message was already handled. Watching for new messages.");
       }
-    } catch (error) { pause(error.message); }
+    } catch (error) {
+      if (running && monitor.scope === "all" && !pendingDelivery && !error.message.includes("session expired")) {
+        due = 0; status(`${error.message} Watching for the next incoming message.`);
+      } else pause(error.message);
+    }
     finally { ticking = false; }
   }, 1000);
   window.addEventListener("pagehide", () => pause());
-  try { await loadConfig(); } catch (error) { status(error.message); }
+  try {
+    await loadConfig();
+    const saved = await chrome.storage.local.get("monitor");
+    if (saved.monitor) {
+      monitor = Core.monitorSettings(saved.monitor);
+      if (saved.monitor.replyModeVersion !== 3) await saveMonitor();
+    }
+    $("pause").disabled = !monitor.enabled;
+    $("mode").value = monitor.mode; $("scope").value = monitor.scope;
+    if (monitor.enabled) {
+      resumePending = true;
+      // A saved selected-chat mode is scoped to its previous recipient only.
+      if (monitor.scope === "selected") {
+        const opened = Teams.snapshot(config);
+        if (monitor.identity && opened.identity !== monitor.identity) throw new Error("Open the previously selected chat or choose All unread direct chats and press Start.");
+        bind(opened);
+      }
+      await start(true);
+    }
+  } catch (error) { status(error.message); }
 })();

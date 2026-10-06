@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "Teams Local Replies",
-  "version": "0.1.0",
-  "description": "Short local-model replies in one selected Teams web or PWA chat.",
+  "version": "0.2.1",
+  "description": "Automatic local-model replies across unread Teams direct chats, with Banglish and media context.",
   "minimum_chrome_version": "120",
   "permissions": ["storage"],
   "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
