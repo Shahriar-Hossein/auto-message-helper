@@ -2,6 +2,7 @@
 const form = document.getElementById("settings");
 const status = document.getElementById("status");
 const selectors = document.getElementById("selectors");
+document.getElementById("extension-origin").value = chrome.runtime.getURL("").replace(/\/$/, "");
 function display(config) {
   for (const key of Object.keys(TeamsReplyCore.DEFAULTS)) {
     if (key !== "selectors") form.elements.namedItem(key).value = config[key];

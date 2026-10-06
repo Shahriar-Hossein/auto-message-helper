@@ -60,6 +60,17 @@ test("failed inference stays reserved and is not automatically retried", async (
   assert.equal(h.requests(), 1);
   assert.equal(h.data.flight, undefined);
 });
+test("Ollama 403 identifies the exact extension origin and server-side fix", async () => {
+  const h = harness(async () => ({ ok: false, status: 403 }));
+  await h.send({ type: "claim", token: "a" });
+  const result = await h.send(h.payload);
+  assert.equal(result.ok, false);
+  assert.match(result.error, /chrome-extension:\/\/test-extension/);
+  assert.match(result.error, /OLLAMA_ORIGINS/);
+  assert.match(result.error, /restart/);
+  assert.equal((await h.send(h.payload)).ok, false);
+  assert.equal(h.requests(), 1);
+});
 test("concurrent generations serialize reservation and allow only one fetch", async () => {
   let resolveFetch;
   const h = harness(() => new Promise(resolve => { resolveFetch = resolve; }));

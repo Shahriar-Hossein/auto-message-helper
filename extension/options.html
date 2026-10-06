@@ -14,6 +14,8 @@
         <label>Your exact Teams display name<input name="selfName" required maxlength="200" placeholder="As shown on your sent messages"></label>
       </div>
       <p class="hint">Ollama: <code>http://127.0.0.1:11434</code>. LM Studio: <code>http://127.0.0.1:1234/v1</code>. Use the model ID reported by your server. Requests stay on localhost.</p>
+      <label style="margin-top:16px">This extension's origin<input id="extension-origin" readonly aria-describedby="origin-help"></label>
+      <p id="origin-help" class="hint">For Ollama HTTP 403, add this exact origin to the running server's <code>OLLAMA_ORIGINS</code> and restart that server. On Linux with a systemd service, use <code>sudo systemctl edit ollama.service</code> and add <code>Environment="OLLAMA_ORIGINS=YOUR_EXTENSION_ORIGIN"</code> under <code>[Service]</code>.</p>
     </fieldset>
     <fieldset><legend>Reply preferences</legend>
       <div class="grid">

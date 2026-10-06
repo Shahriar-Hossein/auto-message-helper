@@ -40,7 +40,13 @@ async function infer(config, messages) {
       body: JSON.stringify(Core.modelRequest(config, messages)), signal: controller.signal,
       redirect: "error", credentials: "omit"
     });
-    if (!response.ok) throw new Error(`Local server returned HTTP ${response.status}. Check the URL, model ID, and server origin settings.`);
+    if (!response.ok) {
+      if (response.status === 403 && config.provider === "ollama") {
+        const origin = chrome.runtime.getURL("").replace(/\/$/, "");
+        throw new Error(`Ollama rejected this extension's origin (${origin}). Add ${origin} to OLLAMA_ORIGINS in the running Ollama server and restart it. See Settings for your extension origin.`);
+      }
+      throw new Error(`Local server returned HTTP ${response.status}. Check the URL, model ID, and server access settings.`);
+    }
     return Core.replyText(await response.json(), config.provider);
   } catch (error) {
     if (error.name === "AbortError") throw new Error("Local model timed out after 25 seconds. Warm up the model, then retry manually.");

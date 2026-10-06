@@ -34,6 +34,15 @@ OLLAMA_ORIGINS="chrome-extension://YOUR_EXTENSION_ID" ollama serve
 
 For a system service, configure its environment instead of starting a second server on the same port. [Ollama origin configuration](https://github.com/ollama/ollama/blob/main/docs/faq.mdx), [Ollama chat API](https://docs.ollama.com/api/chat)
 
+**HTTP 403 from Ollama:** copy **This extension's origin** from extension Settings. On Linux with systemd, run `sudo systemctl edit ollama.service` and add the following, replacing the example origin with the one you copied:
+
+```ini
+[Service]
+Environment="OLLAMA_ORIGINS=chrome-extension://YOUR_EXTENSION_ID"
+```
+
+Then apply it with `sudo systemctl daemon-reload` and `sudo systemctl restart ollama.service`. If `OLLAMA_ORIGINS` already allows other origins, preserve them and append this origin separated by a comma. Retry **Save & test model**, then **Generate now**. A model-ID error is separate: for example, `qwen2.5-coder:1.5b` and `qwen2.5:1.5b` are different model names, so use the exact entry from `ollama list`.
+
 LM Studio uses `/v1/chat/completions`; enable its local server and select its actual model ID. [LM Studio chat completions](https://lmstudio.ai/docs/developer/openai-compat/chat-completions)
 
 Only HTTP endpoints on `localhost` or `127.0.0.1` are accepted. Model requests run in the extension worker, use loopback host permissions, omit credentials, and reject redirects. [Chrome extension network requests](https://developer.chrome.com/docs/extensions/develop/concepts/network-requests)
