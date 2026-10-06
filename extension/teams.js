@@ -204,28 +204,151 @@
       imageCount++; imageBytes += item.data.length; return item;
     }) })).reverse();
   }
-  function unreadChats(config) {
-    const matches = all(config.selectors.chatItem);
-    // Wrappers and their inner row may both match: use the inner target only.
-    const items = matches.filter(node => !matches.some(other => other !== node && node.contains(other)));
-    return items.filter(node => node.matches(config.selectors.unread) || all(config.selectors.unread, node).length).map(node => {
-      const nameNode = node.querySelector('[data-tid="chat-list-item-title"], [data-tid="chat-name"], [data-tid="chatListItem-title"], [data-tid="chat-title"]');
-      const title = Core.normalize(text(nameNode) || node.getAttribute("data-chat-name") || node.getAttribute("title") ||
-        node.getAttribute("aria-label")?.replace(/\b(unread|chat|messages?)\b[: ,]*/gi, ""));
+  const CHAT_NAME = '[data-tid="chat-list-item-title"], [data-tid="chat-list-item-name"], [data-tid="chat-name"], [data-tid="chatListItem-title"], [data-tid="chat-item-title"], [data-tid="chat-title"], [role="heading"]';
+  const IN_CONVERSATION = '[data-tid="entity-header"], [data-tid="chat-title"], [data-tid="chat-topic-menu"], [data-tid="message-pane-layout"], [data-tid="chat-pane-item"], [data-tid="ckeditor"]';
+  function unreadFilter() {
+    const buttons = all('button, [role="button"]');
+    const matches = buttons.filter(node => !node.closest(IN_CONVERSATION) && (Core.normalize(text(node)).toLowerCase() === "unread" || /^(unread|filter unread (chats|messages))$/i.test(Core.normalize(node.getAttribute("aria-label")))));
+    return matches.length === 1 ? matches[0] : null;
+  }
+  function filterActive() {
+    const filter = unreadFilter();
+    return !!filter && (filter.getAttribute("aria-pressed") === "true" || filter.getAttribute("aria-selected") === "true" || filter.getAttribute("data-state") === "on");
+  }
+  async function enableUnreadFilter(valid) {
+    const filter = unreadFilter();
+    if (filter && !filterActive() && valid()) {
+      filter.click(); await delay(600);
+    }
+  }
+  const AVATAR = 'img, [role="img"]:not(svg), [data-tid*="avatar"], [class*="avatar" i]';
+  function nameElement(node) {
+    const known = node.querySelector(CHAT_NAME);
+    if (known) return known;
+    if (node.hasAttribute("data-chat-name") || node.hasAttribute("data-display-name")) return node;
+    // Some PWA rows expose plain spans rather than heading roles. Prefer a leaf
+    // label and exclude avatars, timestamps, unread counters, and menu controls.
+    return all('span, div, p, strong, b', node).find(child => {
+      const value = Core.normalize(text(child));
+      return !child.children.length && !child.closest(AVATAR) && !child.matches('[aria-label*="unread" i]') &&
+        value.length >= 2 && value.length <= 200 && !/^[A-Z]{1,3}$/.test(value) &&
+        !/^\d+([:/., -]\d+)*(\s*[AP]M)?$|^(unread|more options)$/i.test(value);
+    }) || (node.getAttribute("aria-label") && node.matches('[role="treeitem"], [role="listitem"], [role="option"]') ? node : null);
+  }
+  function rowTitle(node, name) {
+    const value = node.getAttribute("data-chat-name") || node.getAttribute("data-display-name") ||
+      name?.getAttribute("title") || name?.getAttribute("aria-label") || text(name);
+    const normalized = Core.normalize(value);
+    return name === node && node.hasAttribute("aria-label") && !node.hasAttribute("data-chat-name") && !node.hasAttribute("data-display-name")
+      ? normalized.replace(/^(chat (with|:)|unread (chat|messages? from):?)\s*/i, "").split(/[,\n]/)[0].replace(/\s+unread$/i, "").trim()
+      : normalized;
+  }
+  function sidebarRow(node, config) {
+    for (let candidate = node; candidate && candidate !== document.body; candidate = candidate.parentElement) {
+      if (candidate.closest(IN_CONVERSATION) || candidate.querySelector(config.selectors.row)) return null;
+      const names = all(CHAT_NAME, candidate);
+      // Do not turn a whole list, a filter, or the app navigation badge into a chat.
+      if (names.length > 1) return null;
+      const name = nameElement(candidate);
+      if (!name || !rowTitle(candidate, name)) continue;
+      if (candidate.matches(config.selectors.chatItem)) return candidate;
+      const avatar = candidate.querySelector(AVATAR);
+      if (avatar && (candidate.matches('button, a[href], [role="button"], [tabindex]') || getComputedStyle(candidate).cursor === "pointer")) return candidate;
+    }
+    return null;
+  }
+  function sidebarRows(config) {
+    const rows = new Set(all(config.selectors.chatItem).filter(node => !node.closest(IN_CONVERSATION) && !node.querySelector(config.selectors.row) && all(CHAT_NAME, node).length <= 1 && all(config.selectors.chatItem, node).length <= 1 && nameElement(node)));
+    // The personal Teams PWA has heading-based sidebar entries without chat data-tid
+    // values or data-chat-id. Resolve the heading and unread marker to their own row.
+    for (const marker of [...all('[role="heading"]'), ...all(config.selectors.unread)]) {
+      const row = sidebarRow(marker, config); if (row) rows.add(row);
+    }
+    return [...rows].filter(node => ![...rows].some(parent => parent !== node && parent.contains(node)));
+  }
+  function explicitUnread(node, config) {
+    const markers = [node, ...all(config.selectors.unread, node)].filter(item => item.matches(config.selectors.unread));
+    return markers.some(item => {
+      if (item.getAttribute("data-is-unread") === "false" || item.getAttribute("data-unread") === "false" || item.getAttribute("data-unread-count") === "0") return false;
+      return !/\b(no|0) unread\b|mark (as )?unread/i.test(item.getAttribute("aria-label") || "");
+    });
+  }
+  function sidebarScroller(row) {
+    for (let node = row?.parentElement; node && node !== document.body; node = node.parentElement) {
+      if (/auto|scroll/.test(getComputedStyle(node).overflowY) && node.clientHeight > 0) return node;
+    }
+    return null;
+  }
+  function inbox(config) {
+    const rows = sidebarRows(config), filtered = filterActive();
+    const weights = rows.map(node => Number(getComputedStyle(nameElement(node)).fontWeight) || 400);
+    const baseWeight = Math.min(...weights, 700);
+    const entries = rows.map((node, index) => {
+      const name = nameElement(node);
+      const title = rowTitle(node, name);
       const id = node.getAttribute("data-chat-id") || node.getAttribute("data-conversation-id") || node.getAttribute("data-thread-id") || "";
-      return { node, title, id, key: id || node.id || title };
-    }).filter(item => item.title && item.key);
+      const peer = node.querySelector('[data-tid^="participant-"]')?.getAttribute("data-tid").slice("participant-".length) || "";
+      const key = id || (peer ? `direct:${peer}` : title);
+      const unread = filtered || explicitUnread(node, config) || weights[index] >= 600 && weights[index] > baseWeight;
+      const viewport = sidebarScroller(node);
+      return { node, title, id, peer, key, unread, viewport, offset: viewport?.scrollTop || 0,
+        signature: JSON.stringify([title, Core.normalize(text(node)), node.getAttribute("data-unread-count") || ""]) };
+    }).filter(item => item.title && item.key && item.title !== config.selfName && !/\(you\)$/i.test(item.title));
+    // A name alone is insufficient when two rows use it; a stable row/peer ID can distinguish them.
+    for (const entry of entries) entry.ambiguous = entries.filter(other => other.title === entry.title).length > 1;
+    return { entries, rowCount: rows.length, filtered, filterAvailable: !!unreadFilter() };
+  }
+  function unreadChats(config) { return inbox(config).entries.filter(item => item.unread); }
+  const scanOffsets = new WeakMap();
+  async function scanUnread(config, valid = () => true) {
+    await enableUnreadFilter(valid);
+    let state = inbox(config);
+    const found = new Map();
+    const collect = () => { for (const item of state.entries.filter(item => item.unread)) found.set(item.key, item); };
+    collect();
+    const viewport = state.entries.map(item => item.viewport).find(Boolean);
+    if (!viewport || viewport.scrollHeight <= viewport.clientHeight || !valid()) return { ...state, unread: [...found.values()] };
+    const originalTop = viewport.scrollTop;
+    try {
+      viewport.scrollTop = scanOffsets.get(viewport) || 0;
+      viewport.dispatchEvent(new Event("scroll", { bubbles: true })); await delay(150);
+      for (let page = 0; page < 12 && valid(); page++) {
+        state = inbox(config); collect();
+        const end = Math.max(0, viewport.scrollHeight - viewport.clientHeight);
+        if (viewport.scrollTop >= end - 2) { scanOffsets.set(viewport, 0); break; }
+        const next = Math.min(end, viewport.scrollTop + Math.max(80, viewport.clientHeight * 0.8));
+        viewport.scrollTop = next; scanOffsets.set(viewport, next);
+        viewport.dispatchEvent(new Event("scroll", { bubbles: true })); await delay(150);
+      }
+      state = inbox(config); collect();
+    } finally {
+      if (valid() && viewport.isConnected) {
+        viewport.scrollTop = originalTop; viewport.dispatchEvent(new Event("scroll", { bubbles: true })); await delay(150);
+      }
+    }
+    return { ...state, unread: [...found.values()] };
   }
   async function openUnread(config, target, valid = () => true) {
-    if (!target.node.isConnected || !valid()) throw new Error("The unread chat changed before opening.");
+    if (!valid()) throw new Error("The unread chat changed before opening.");
+    // Teams recycles sidebar DOM nodes; rediscover the queued recipient by its key.
+    if (target.viewport?.isConnected) {
+      target.viewport.scrollTop = target.offset;
+      target.viewport.dispatchEvent(new Event("scroll", { bubbles: true })); await delay(150);
+    }
+    const live = inbox(config).entries.find(item => item.key === target.key);
+    if (!live?.node.isConnected || !live.unread) throw new Error("The queued chat is no longer unread or available.");
+    target = live;
+    if (target.ambiguous && !target.id && !target.peer) throw new Error("Two sidebar chats have the same name; cannot identify this recipient safely.");
     if (all(config.selectors.composer).length && !composerEmpty(config)) throw new Error("Your composer contains a draft or attachment. It was preserved.");
-    target.node.click();
+    const nameControl = nameElement(target.node)?.closest('button, a[href], [role="button"], [tabindex]');
+    const control = nameControl && target.node.contains(nameControl) ? nameControl : target.node;
+    control.click();
     let last = "", settled = 0;
     for (let attempt = 0; attempt < 24 && valid(); attempt++) {
       await delay(250);
       try {
         const result = snapshot(config);
-        if (result.title !== target.title || target.id && result.chatId !== target.id) continue;
+        if (result.title !== target.title || target.id && result.chatId !== target.id || !target.id && target.peer && result.chatId !== `direct:${target.peer}`) continue;
         const mark = Core.fingerprint(result);
         settled = mark === last ? settled + 1 : 0; last = mark;
         if (settled < 2) continue;
@@ -306,6 +429,12 @@
         report.push(`${key}: ${nodes.filter(visible).length} / ${nodes.length}`);
       } catch (error) { report.push(`${key}: invalid CSS selector (${error.message})`); }
     }
+    const sidebar = inbox(config);
+    report.push("", `Detected sidebar rows: ${sidebar.rowCount}`, `Readable sidebar names: ${sidebar.entries.length}`,
+      `Unread sidebar chats: ${sidebar.entries.filter(item => item.unread).length}`, `Unread filter available: ${sidebar.filterAvailable}`, `Unread filter active: ${sidebar.filtered}`);
+    for (const entry of sidebar.entries.slice(0, 4)) {
+      report.push(`Sidebar row: ${entry.node.tagName.toLowerCase()} role=${entry.node.getAttribute("role") || "none"}; title role=${nameElement(entry.node)?.getAttribute("role") || "none"}; unread=${entry.unread}; stable key=${!!(entry.id || entry.peer)}; scrollable=${!!entry.viewport}`);
+    }
     const safeTid = value => value.startsWith("participant-") ? "participant-<redacted>" : value;
     const counts = new Map();
     for (const node of document.querySelectorAll("[data-tid]")) {
@@ -347,5 +476,5 @@
     } catch (error) { report.push(`Row inspection failed: ${error.message}`); }
     return report.join("\n");
   }
-  root.TeamsReplyAdapter = { snapshot, recentHistory, captureMedia, unreadChats, openUnread, composerEmpty, insert, send, diagnostics };
+  root.TeamsReplyAdapter = { snapshot, recentHistory, captureMedia, unreadChats, scanUnread, openUnread, composerEmpty, insert, send, diagnostics };
 })(globalThis);

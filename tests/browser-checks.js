@@ -9,6 +9,7 @@
   const click = async id => {
     $(id).click(); await wait(); await wait();
     if (["generate", "preview", "send", "insert"].includes(id)) await new Promise(resolve => setTimeout(resolve, 1300));
+    if (id === "start" && $("scope").value === "all") await new Promise(resolve => setTimeout(resolve, 2500));
   };
   const tick = async () => { for (const callback of testState.intervals) await callback(); };
   const genCount = () => testState.requests.filter(m => m.type === "generate").length;
@@ -305,8 +306,8 @@
       sidebar.append(item); return item;
     }
     const bob = unreadChat("chat-b", "Bob"), carol = unreadChat("chat-c", "Carol");
-    $("scope").value = "all"; $("mode").value = "auto"; await click("start");
-    editor.textContent = "Preserve my unfinished message"; await tick();
+    $("scope").value = "all"; $("mode").value = "auto";
+    editor.textContent = "Preserve my unfinished message"; await click("start"); await tick();
     check("all-chat monitoring waits while the current composer contains a draft", () => {
       assert(main.dataset.chatId === "chat-a" && editor.textContent === "Preserve my unfinished message", "Unread navigation discarded an existing draft");
     });
@@ -348,6 +349,120 @@
     testState.suppressEcho = false;
     await click("pause");
     check("Pause disables saved monitoring for future sessions", () => assert(testState.monitor.enabled === false, "Pause did not persist"));
+    sidebar.remove();
+    await click("select");
+    // Reproduce the reported PWA: no chat data-tid or data-chat-id, accessible
+    // headings in clickable rows, an unread dot, and the native Unread filter.
+    const personalSidebar = document.createElement("aside");
+    const unreadFilter = document.createElement("button"); unreadFilter.textContent = "Unread"; unreadFilter.setAttribute("aria-label", "Filter unread chats"); unreadFilter.setAttribute("aria-pressed", "false");
+    const personalList = document.createElement("div"); personalList.style.cssText = "height:220px;overflow-y:auto";
+    personalSidebar.append(unreadFilter, personalList); document.body.prepend(personalSidebar);
+    const contacts = [
+      { name: "Already read friend", unread: false, preview: "Old incoming message", revision: 0 },
+      { name: "Abid Hasan", unread: true, preview: "hello chuckles...i heard...", revision: 0 },
+      { name: "Dina", unread: true, preview: "Hello", revision: 0 }
+    ];
+    function renderPersonalSidebar() {
+      personalList.replaceChildren();
+      for (const contact of contacts) {
+        if (unreadFilter.getAttribute("aria-pressed") === "true" && !contact.unread) continue;
+        const row = document.createElement("div"); row.tabIndex = 0; row.setAttribute("role", "button"); row.style.cssText = "height:60px;cursor:pointer";
+        const avatar = document.createElement("span"); avatar.setAttribute("role", "img"); avatar.textContent = "●";
+        const lines = document.createElement("div");
+        const name = document.createElement("div"); if (contact.name !== "Ehsan") name.setAttribute("role", "heading"); name.style.fontWeight = contact.unread ? "700" : "400"; name.textContent = contact.name;
+        const preview = document.createElement("div"); preview.textContent = contact.preview; lines.append(name, preview);
+        const nameButton = contact.name === "Dina" ? document.createElement("button") : null;
+        if (nameButton) { nameButton.append(lines); row.append(avatar, nameButton); } else row.append(avatar, lines);
+        if (contact.unread) { const dot = document.createElement("span"); dot.setAttribute("aria-label", "Unread"); dot.textContent = "•"; row.append(dot); }
+        (nameButton || row).addEventListener("click", () => {
+          contact.unread = false; main.dataset.chatId = `personal-${contact.name}`; title.textContent = contact.name;
+          list.replaceChildren();
+          for (let i = 0; i < 25; i++) {
+            const message = document.createElement("div"); message.dataset.tid = "chat-pane-message"; message.dataset.messageId = `${contact.name}-${contact.revision}-${i}`; message.dataset.authorName = contact.name;
+            const body = document.createElement("p"); body.dataset.tid = "message-body"; body.textContent = `${contact.name}: ${contact.preview} (${i})`; message.append(body); list.append(message);
+          }
+          list.scrollTop = list.scrollHeight; renderPersonalSidebar();
+        });
+        personalList.append(row);
+      }
+    }
+    unreadFilter.addEventListener("click", () => {
+      unreadFilter.setAttribute("aria-pressed", unreadFilter.getAttribute("aria-pressed") === "true" ? "false" : "true"); renderPersonalSidebar();
+    });
+    renderPersonalSidebar();
+    const initialPersonal = TeamsReplyAdapter.unreadChats(testState.config);
+    const initialDinaNode = initialPersonal.find(item => item.title === "Dina").node;
+    check("reported PWA heading rows and unread dots are detected without chat data attributes", () => {
+      assert(document.querySelectorAll(testState.config.selectors.chatItem).length === 0, "Fixture accidentally uses configured chat row selectors");
+      assert(initialPersonal.map(item => item.title).join(",") === "Abid Hasan,Dina", "Unread dots were not bound to their own named rows");
+      assert(!initialPersonal.some(item => item.title === "Unread" || item.title === "Already read friend"), "Filter or read chat was treated as unread");
+    });
+    list.scrollTop = 0;
+    const personalBefore = testState.sendCount;
+    $("scope").value = "all"; $("mode").value = "auto"; await click("start");
+    check("Start immediately scans existing unread chats even above the current chat's latest message", () => {
+      assert(unreadFilter.getAttribute("aria-pressed") === "true", "Native Unread filter was not activated");
+      assert(title.textContent === "Abid Hasan" && $("status").textContent.includes("Preparing a reply"), `Existing unread chat was not opened on Start: ${$("status").textContent}`);
+      assert($("inbox-status").textContent.includes("2 found"), "Initial unread scan count was not shown");
+      assert(!initialDinaNode.isConnected, "Fixture did not recycle the queued sidebar DOM row");
+    });
+    testState.now += 1100; await tick(); await tick();
+    check("first existing unread PWA chat receives an automatic reply", () => assert(testState.sendCount === personalBefore + 1, `No reply to the first unread chat: ${$("status").textContent}`));
+    await tick(); testState.now += 1100; await tick(); await tick();
+    check("queued PWA chats are resolved after sidebar rerenders and answered one by one", () => {
+      assert(title.textContent === "Dina" && testState.sendCount === personalBefore + 2, `Second queued chat was not answered: ${$("status").textContent}`);
+      const payload = testState.requests.filter(message => message.type === "generate").at(-1);
+      assert(payload.messages.every(message => message.text.includes("Dina")), "Queued reply used the previous recipient's context");
+    });
+    contacts.push({ name: "Ehsan", unread: true, preview: "A new message while the watcher is on", revision: 0 }); renderPersonalSidebar();
+    testState.now += 3100; await tick(); testState.now += 1100; await tick(); await tick();
+    check("new unread chats with plain-text names are discovered continuously without another Start", () => {
+      assert(title.textContent === "Ehsan" && testState.sendCount === personalBefore + 3, `New unread chat was missed: ${$("status").textContent}`);
+    });
+    const abid = contacts.find(contact => contact.name === "Abid Hasan"); abid.unread = true; abid.revision++; renderPersonalSidebar();
+    testState.now += 3100; await tick(); testState.now += 1100; await tick(); await tick();
+    check("a previously answered person can become unread again with the same sidebar preview", () => {
+      assert(title.textContent === "Abid Hasan" && testState.sendCount === personalBefore + 4, `Repeat unread contact was suppressed: ${$("status").textContent}`);
+      const payload = testState.requests.filter(message => message.type === "generate").at(-1);
+      assert(payload.messages.at(-1).id.includes("Abid Hasan-1-"), "Repeat contact used stale messages");
+    });
+    await click("pause");
+    contacts.push({ name: "Paused contact", unread: true, preview: "Do not send while paused", revision: 0 }); renderPersonalSidebar();
+    testState.now += 3100; await tick();
+    check("Pause stops unread scanning and automatic queue delivery", () => assert(testState.sendCount === personalBefore + 4 && title.textContent === "Abid Hasan", "Paused watcher opened or answered another chat"));
+    personalSidebar.remove();
+    const virtualSidebar = document.createElement("div"); virtualSidebar.style.cssText = "height:120px;overflow-y:auto"; document.body.prepend(virtualSidebar);
+    const virtualNames = Array.from({ length: 10 }, (_, i) => i === 1 ? "Visible unread" : i === 8 ? "Hidden unread" : `Read contact ${i}`);
+    function renderVirtualSidebar() {
+      const start = Math.min(8, Math.floor(virtualSidebar.scrollTop / 120) * 2);
+      const before = document.createElement("div"); before.style.height = `${start * 60}px`;
+      virtualSidebar.replaceChildren(before);
+      for (let i = start; i < start + 2; i++) {
+        const row = document.createElement("div"); row.setAttribute("role", "option"); row.style.height = "60px";
+        const name = document.createElement("div"); name.setAttribute("role", "heading"); name.textContent = virtualNames[i]; row.append(name);
+        if (i === 1 || i === 8) { const marker = document.createElement("span"); marker.setAttribute("aria-label", "Unread"); marker.textContent = "•"; row.append(marker); }
+        row.addEventListener("click", () => {
+          main.dataset.chatId = `virtual-contact-${i}`; title.textContent = virtualNames[i]; list.replaceChildren();
+          const message = document.createElement("div"); message.dataset.tid = "chat-pane-message"; message.dataset.messageId = "hidden-incoming"; message.dataset.authorName = virtualNames[i];
+          const body = document.createElement("p"); body.dataset.tid = "message-body"; body.textContent = "An unread message from outside the visible sidebar"; message.append(body); list.append(message); list.scrollTop = list.scrollHeight;
+        });
+        virtualSidebar.append(row);
+      }
+      const after = document.createElement("div"); after.style.height = `${(8 - start) * 60}px`; virtualSidebar.append(after);
+    }
+    virtualSidebar.addEventListener("scroll", event => { if (!event.isTrusted) renderVirtualSidebar(); });
+    renderVirtualSidebar();
+    const sidebarScan = await TeamsReplyAdapter.scanUnread(testState.config);
+    const hiddenTarget = sidebarScan.unread.find(item => item.title === "Hidden unread");
+    check("sidebar scanning discovers unread rows outside the loaded virtualized window", () => {
+      assert(sidebarScan.unread.length === 2 && hiddenTarget, "An offscreen unread chat was not queued");
+      assert(virtualSidebar.scrollTop === 0 && !hiddenTarget.node.isConnected, "Sidebar viewport was not restored or fixture did not recycle DOM");
+    });
+    const hiddenOpened = await TeamsReplyAdapter.openUnread(testState.config, hiddenTarget);
+    check("a queued virtualized chat is rediscovered at its saved sidebar position", () => {
+      assert(hiddenOpened.title === "Hidden unread" && hiddenOpened.messages.at(-1).text.includes("outside the visible sidebar"), "Queued virtualized row opened the wrong chat");
+    });
+    virtualSidebar.remove();
     document.getElementById("test-result").textContent = `PASS (${checked.length} browser checks)\n${checked.join("\n")}`;
     document.documentElement.dataset.testResult = "pass";
   } catch (error) {

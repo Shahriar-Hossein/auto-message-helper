@@ -10,10 +10,11 @@
     send: '[data-tid="sendMessageCommands-send"], button[data-tid="send-message"], button[data-tid="sendMessageButton"]',
     scroller: '[data-tid="message-pane-list-viewport"], [data-tid="chat-pane-list"]',
     identity: '[data-chat-id][aria-selected="true"], [data-conversation-id][aria-selected="true"]',
-    chatItem: '[data-tid="chat-list-item"], [data-tid="chat-list-item-wrapper"], [data-tid="chatListItem"], [role="treeitem"][data-chat-id], [role="listitem"][data-chat-id]',
+    chatItem: '[data-tid="chat-list-item"], [data-tid="chat-list-item-wrapper"], [data-tid="chatListItem"], [data-tid="chat-item"], [role="treeitem"], [role="listitem"], [role="option"]',
     unread: '[data-is-unread="true"], [data-unread="true"], [data-tid*="unread"], [aria-label*="unread" i]'
   };
   const LEGACY_SELECTORS = {
+    chatItem: '[data-tid="chat-list-item"], [data-tid="chat-list-item-wrapper"], [data-tid="chatListItem"], [role="treeitem"][data-chat-id], [role="listitem"][data-chat-id]',
     header: '[data-tid="chat-header-title"], [data-tid="chat-topic"], [data-tid="chat-pane-title"]',
     body: '[data-tid="message-body"], [data-tid="messageBodyContent"], [data-tid="chat-pane-message-content"]',
     send: 'button[data-tid="send-message"], button[data-tid="sendMessageButton"]'

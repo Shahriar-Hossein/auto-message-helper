@@ -50,11 +50,11 @@ Only HTTP endpoints on `localhost` or `127.0.0.1` are accepted. Model requests r
 ## Use it
 
 1. Configure your model and exact Teams display name in **Settings**.
-2. Choose **Automatic send** and **All unread direct chats**, then click **Start** once. These are the defaults.
-3. Leave Teams open. The extension watches the current conversation and visible unread sidebar entries, opens unread chats one at a time, confirms the recipient, reads up to the latest **20 messages**, and sends the reply.
+2. Choose **Automatic send** and **All unread direct chats**, then click **Start** once. It immediately scans existing unread chats and starts processing them one at a time.
+3. Leave Teams open. The extension uses Teams’ **Unread** filter when available, scans the sidebar every three seconds while idle, and queues unread chats. It opens each chat, confirms the recipient, reads up to the latest **20 messages**, sends the reply, verifies the outgoing message, then moves to the next queued chat. The panel shows how many unread chats were found and how many are queued.
 4. Monitoring resumes after reloading or reopening Teams, including checking the open conversation for an unhandled incoming message. **Pause** saves monitoring as off. Only one Teams window in the browser profile controls replies.
 
-Use **Selected chat only** to restrict monitoring to one person: open that chat, click **Select this chat**, inspect sender labels, and start. Resuming this mode requires the same conversation. Groups and channels are excluded. First Start establishes a baseline in the open chat; unread conversations are processed. Reload resumes unhandled incoming messages, with saved attempt hashes preventing repeat automatic attempts.
+Use **Selected chat only** to restrict monitoring to one person: open that chat, click **Select this chat**, inspect sender labels, and start. Resuming this mode requires the same conversation. Groups and channels are excluded. Selected-chat mode establishes a baseline in the open chat. All-unread mode processes messages that were already unread when Start was clicked, including the current conversation if it appears unread in the sidebar. Reload resumes unhandled incoming messages, with saved attempt hashes preventing repeat automatic attempts.
 
 **Generate & send** always inserts and sends, even if incoming-message monitoring is set to Draft. **Preview reply** creates a reviewable panel draft. **Send reply** sends that existing draft without generating it again. It explicitly allows retrying an earlier attempt. If the latest message is yours, it waits for an incoming message. Use **Send reply** to send a panel preview, or **Insert draft** followed by Teams' Send button; monitoring waits until you insert or dismiss the panel draft.
 
@@ -70,9 +70,9 @@ Images, GIFs, and media-only messages count in the 20-message window. Captions a
 
 Loaded previews are resized to at most 384 pixels per side, with a maximum of 20 encoded images and 2 MB total across the context; remaining media retain captions. Images that the browser cannot read, including restricted cross-origin previews or unloaded media, also retain captions. The extension does not download attachment files. It replies with text and emojis, not outgoing GIFs or images.
 
-Insertion uses the editor's plain-text paste handling or a native editing command with the caret in the composer. It verifies that Teams retained the text, then waits up to two seconds for the actual Send button to become enabled. It clicks Send once and observes a matching new outgoing message. Existing composer text and attachments are preserved; automatic monitoring waits while you type or read older history. In-flight replies are discarded if the conversation changes or you type.
+Insertion uses the editor's plain-text paste handling or a native editing command with the caret in the composer. It verifies that Teams retained the text, then waits up to two seconds for the actual Send button to become enabled. It clicks Send once and observes a matching new outgoing message. Existing composer text and attachments are preserved; sending and navigation wait while your Teams composer contains a draft. All-unread mode continues scanning and can open queued chats while the current conversation is scrolled up. In-flight replies are discarded if the conversation changes or you type.
 
-Reload the extension in `chrome://extensions` or `edge://extensions`, then reload Teams to apply updates. The panel should show **v0.2.1** and **Generate & send**. Old saved monitoring modes switch to Automatic send once on this upgrade; selecting Draft and pressing Start in this version preserves that explicit choice. Old 5- or 10-message defaults migrate to 20; your model, display name, and custom style remain saved.
+Reload the extension in `chrome://extensions` or `edge://extensions`, then reload Teams to apply updates. The panel should show **v0.2.2** and **Generate & send**. Old saved monitoring modes switch to Automatic send once on this upgrade; selecting Draft and pressing Start in this version preserves that explicit choice. Old sidebar selector defaults migrate automatically to the new accessible-row selectors. Old 5- or 10-message defaults migrate to 20; your model, display name, and custom style remain saved.
 
 ## If selectors differ
 
@@ -89,7 +89,7 @@ In **Settings → Teams selectors**, update the JSON CSS selectors using the PWA
 | `composer` | One visible Teams `contenteditable` input |
 | `send` | One visible Teams Send button |
 | `scroller` | The actual scrolling viewport containing the message rows |
-| `chatItem` | Visible sidebar chat entries; used to open unread conversations |
+| `chatItem` | Sidebar chat entries; defaults include accessible tree/list/option rows. Personal Teams entries without these attributes are also discovered from their accessible name headings and unread indicators. |
 | `unread` | Unread attributes or indicators on or inside each sidebar entry |
 | `identity` | An element for the **current chat** carrying `data-chat-id`, `data-conversation-id`, or `data-thread-id` |
 
@@ -99,7 +99,7 @@ A conversation key can come from the title's ancestors or a Teams URL containing
 
 Saved original default selectors migrate automatically to newer defaults when the extension loads; custom selectors, model settings, and your display name are preserved. Reload the extension and PWA to apply updates; there is no need to reset your settings.
 
-Virtualized history is loaded with up to eight scroll attempts. If Teams cannot expose 20 messages, the available history is used. Automatic monitoring waits when you scroll away from the bottom.
+Virtualized history is loaded with up to eight scroll attempts. If Teams cannot expose 20 messages, the available history is used. Selected-chat mode waits when you scroll away from the bottom; all-unread mode keeps scanning the inbox and opens queued unread chats.
 
 ## Behavior and limits
 
@@ -109,7 +109,7 @@ Virtualized history is loaded with up to eight scroll attempts. If Teams cannot 
 - Saves only hashed attempt keys for up to 500 recent attempts. Failed or uncertain automatic attempts are not retried; **Generate & send** explicitly retries. In all-chat mode, a failed generation leaves monitoring enabled for future incoming messages.
 - After Send, looks for a matching new outgoing message. If none appears within 12 seconds, it stops with uncertain delivery. This is a DOM observation, not a server delivery receipt; check Teams before retrying.
 - The model request has a shared 25-second timeout, including image capability detection and any language correction. Warm up slow models first.
-- Requires Teams to remain open in the browser/PWA and the unread sidebar entries to be loaded. Closing Teams stops execution; saved monitoring resumes on reopening. Browser suspension, hidden/sidebar virtualization, and Teams UI changes can delay detection. Native Teams desktop is unsupported.
+- Requires Teams to remain open in the browser/PWA with the chat sidebar available. The extension scrolls the sidebar in bounded batches to discover virtualized entries and re-finds queued rows after Teams rerenders them. Closing Teams stops execution; saved monitoring scans the inbox again on reopening. Browser suspension and Teams UI changes can delay detection. Native Teams desktop is unsupported.
 
 Settings, monitoring preferences, and hashed attempt keys use local extension storage. Chat text, encoded previews, and replies stay in memory; session storage holds only controller coordination. Inference goes to your configured loopback server; sending uses Teams. Your server may have its own logging. No telemetry or Microsoft Graph registration is included.
 
