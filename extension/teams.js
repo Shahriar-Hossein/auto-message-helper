@@ -406,19 +406,33 @@
     }
     return editor;
   }
+  function sendControls(config) {
+    const matches = all(config.selectors.send).map(match => match.matches('button, [role="button"]') ? match :
+      match.closest('button, [role="button"]') || match.querySelector('button, [role="button"]') || match);
+    return [...new Set(matches)].filter(visible);
+  }
+  function sendDisabled(control) {
+    return !!control.disabled || control.matches(":disabled") || !!control.closest('[disabled], [aria-disabled="true"], [inert]');
+  }
   async function send(config, reply, valid = () => true) {
     // Send may become enabled after the editor's state catches up with its DOM.
-    for (let attempt = 0; attempt < 20; attempt++) {
+    let reason = "No visible Send control matched. Check the Send selector.";
+    for (let attempt = 0; attempt < 50; attempt++) {
       if (!valid() || Core.normalize(text(composer(config))) !== Core.normalize(reply)) throw new Error("The composer or conversation changed; sending was stopped.");
-      const matches = all(config.selectors.send).map(match => match.matches('button, [role="button"]') ? match :
-        match.closest('button, [role="button"]') || match.querySelector('button, [role="button"]')).filter(Boolean);
-      const buttons = [...new Set(matches)];
-      if (buttons.length > 1) throw new Error("More than one Send button matched. Update the Send selector.");
-      const button = buttons[0];
-      if (button && !button.disabled && button.getAttribute("aria-disabled") !== "true") { button.click(); return; }
+      const controls = sendControls(config);
+      if (controls.length > 1) throw new Error("More than one Send control matched. Update the Send selector.");
+      const control = controls[0];
+      if (control && !sendDisabled(control)) {
+        // Personal Teams may put the click handler directly on a div/span or SVG
+        // rather than expose a native button or an accessible button role.
+        if (typeof control.click === "function") control.click();
+        else control.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, composed: true, view: window }));
+        return;
+      }
+      reason = control ? "The matched Send control remained disabled. Review the composer." : "No visible Send control matched. Check the Send selector.";
       await delay(100);
     }
-    throw new Error("Teams Send did not become available. Review the composer and check the Send selector.");
+    throw new Error(`Teams Send did not become available. ${reason}`);
   }
   function diagnostics(config) {
     // Report DOM metadata, never message text, chat names, IDs, or model settings.
@@ -429,6 +443,13 @@
         report.push(`${key}: ${nodes.filter(visible).length} / ${nodes.length}`);
       } catch (error) { report.push(`${key}: invalid CSS selector (${error.message})`); }
     }
+    try {
+      const controls = sendControls(config);
+      report.push("", `Resolved Send controls: ${controls.length}`);
+      for (const control of controls.slice(0, 4)) {
+        report.push(`Send control: ${control.tagName.toLowerCase()} role=${control.getAttribute("role") || "none"}; disabled=${sendDisabled(control)}; native click=${typeof control.click === "function"}`);
+      }
+    } catch (error) { report.push(`Send inspection failed: ${error.message}`); }
     const sidebar = inbox(config);
     report.push("", `Detected sidebar rows: ${sidebar.rowCount}`, `Readable sidebar names: ${sidebar.entries.length}`,
       `Unread sidebar chats: ${sidebar.entries.filter(item => item.unread).length}`, `Unread filter available: ${sidebar.filterAvailable}`, `Unread filter active: ${sidebar.filtered}`);

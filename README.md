@@ -70,9 +70,9 @@ Images, GIFs, and media-only messages count in the 20-message window. Captions a
 
 Loaded previews are resized to at most 384 pixels per side, with a maximum of 20 encoded images and 2 MB total across the context; remaining media retain captions. Images that the browser cannot read, including restricted cross-origin previews or unloaded media, also retain captions. The extension does not download attachment files. It replies with text and emojis, not outgoing GIFs or images.
 
-Insertion uses the editor's plain-text paste handling or a native editing command with the caret in the composer. It verifies that Teams retained the text, then waits up to two seconds for the actual Send button to become enabled. It clicks Send once and observes a matching new outgoing message. Existing composer text and attachments are preserved; sending and navigation wait while your Teams composer contains a draft. All-unread mode continues scanning and can open queued chats while the current conversation is scrolled up. In-flight replies are discarded if the conversation changes or you type.
+Insertion uses the editor's plain-text paste handling or a native editing command with the caret in the composer. It verifies that Teams retained the text, then waits up to five seconds for the actual Send control to become enabled. Send supports native buttons, clickable div/span controls, and icons, including controls without a button role. It respects disabled controls and disabled ancestors, clicks once, and observes a matching new outgoing message before continuing the unread queue. Existing composer text and attachments are preserved; sending and navigation wait while your Teams composer contains a draft. All-unread mode continues scanning and can open queued chats while the current conversation is scrolled up. In-flight replies are discarded if the conversation changes or you type.
 
-Reload the extension in `chrome://extensions` or `edge://extensions`, then reload Teams to apply updates. The panel should show **v0.2.2** and **Generate & send**. Old saved monitoring modes switch to Automatic send once on this upgrade; selecting Draft and pressing Start in this version preserves that explicit choice. Old sidebar selector defaults migrate automatically to the new accessible-row selectors. Old 5- or 10-message defaults migrate to 20; your model, display name, and custom style remain saved.
+Reload the extension in `chrome://extensions` or `edge://extensions`, then reload Teams to apply updates. The panel should show **v0.2.3** and **Generate & send**. If an earlier failed send left text in Teams' composer, clear that unsent draft once so monitoring can continue; existing drafts are preserved on reload. Old saved monitoring modes switch to Automatic send once on this upgrade; selecting Draft and pressing Start in this version preserves that explicit choice. Old sidebar selector defaults migrate automatically to the new accessible-row selectors. Old 5- or 10-message defaults migrate to 20; your model, display name, and custom style remain saved.
 
 ## If selectors differ
 
@@ -87,7 +87,7 @@ In **Settings → Teams selectors**, update the JSON CSS selectors using the PWA
 | `body` | One text body inside each row; the default also reads untagged `chat-pane-message` text after removing action/reaction controls and media previews |
 | `author` | A display name inside the row or its enclosing `chat-pane-item`, which must contain exactly one message; `data-author-name` on the row is also accepted |
 | `composer` | One visible Teams `contenteditable` input |
-| `send` | One visible Teams Send button |
+| `send` | One visible Teams Send control or its icon; a native button or button role is optional |
 | `scroller` | The actual scrolling viewport containing the message rows |
 | `chatItem` | Sidebar chat entries; defaults include accessible tree/list/option rows. Personal Teams entries without these attributes are also discovered from their accessible name headings and unread indicators. |
 | `unread` | Unread attributes or indicators on or inside each sidebar entry |

@@ -291,6 +291,10 @@
       assert(payload.messages.length === 20 && payload.messages.at(-1).media[0].data, "Full recent media context was not sent to the worker");
       assert($("draft").value === "" && $("mode").value === "draft", "Explicit send became a preview or changed the monitoring mode");
     });
+    // The PWA can expose Send as a clickable div without a button role.
+    // Keep that control for all unread-queue and reload tests below.
+    const pwaSend = document.createElement("div"); pwaSend.dataset.tid = "sendMessageCommands-send"; pwaSend.textContent = "Send";
+    pwaSend.addEventListener("click", testState.sendFixtureReply); actualSend.replaceWith(pwaSend);
     const sidebar = document.createElement("nav"); document.body.prepend(sidebar);
     function unreadChat(id, name) {
       const item = document.createElement("button"); item.dataset.tid = "chat-list-item"; item.dataset.chatId = id; item.dataset.unread = "true";
@@ -316,6 +320,10 @@
       const payload = testState.requests.filter(m => m.type === "generate").at(-1);
       assert(title.textContent === "Bob" && testState.sendCount === manualBefore + 2, `Unread Bob was not answered: ${$("status").textContent}`);
       assert(payload.identity.includes("chat-b") && payload.messages.length === 20 && payload.messages.every(m => m.text.includes("Bob")), "Other chat context leaked into Bob's request");
+    });
+    check("automatic replies click a roleless PWA Send control and leave no manual draft", () => {
+      assert(pwaSend.tagName === "DIV" && !pwaSend.hasAttribute("role"), "Fixture still requires a native button");
+      assert(editor.innerText === "" && $("draft").value === "" && $("status").textContent.includes("Reply appeared"), "Automatic send left a draft awaiting a manual click");
     });
     await tick(); testState.now += 1100; await tick(); await tick();
     check("multiple unread conversations are answered sequentially", () => {
@@ -463,6 +471,35 @@
       assert(hiddenOpened.title === "Hidden unread" && hiddenOpened.messages.at(-1).text.includes("outside the visible sidebar"), "Queued virtualized row opened the wrong chat");
     });
     virtualSidebar.remove();
+    const sendProbe = document.createElement("div"); sendProbe.setAttribute("data-send-probe", ""); sendProbe.textContent = "Send";
+    const probeWrapper = document.createElement("div"); probeWrapper.append(sendProbe); main.append(probeWrapper);
+    const probeConfig = { ...testState.config, selectors: { ...testState.config.selectors, send: "[data-send-probe]" } };
+    editor.textContent = "Only this reply";
+    let probeClicks = 0, clickedWhileDisabled = false;
+    sendProbe.addEventListener("click", () => { probeClicks++; if (sendProbe.getAttribute("aria-disabled") === "true" || probeWrapper.hasAttribute("disabled")) clickedWhileDisabled = true; });
+    sendProbe.setAttribute("aria-disabled", "true");
+    setTimeout(() => sendProbe.setAttribute("aria-disabled", "false"), 2800);
+    await TeamsReplyAdapter.send(probeConfig, "Only this reply");
+    check("non-button Send waits for delayed enablement and clicks exactly once", () => assert(probeClicks === 1 && !clickedWhileDisabled, "Disabled control was clicked or slow enablement timed out"));
+    probeWrapper.setAttribute("disabled", "");
+    setTimeout(() => probeWrapper.removeAttribute("disabled"), 300);
+    await TeamsReplyAdapter.send(probeConfig, "Only this reply");
+    check("non-button Send honors disabled ancestors", () => assert(probeClicks === 2 && !clickedWhileDisabled, "Disabled wrapper was ignored"));
+    sendProbe.setAttribute("aria-disabled", "true"); let validityChecks = 0, cancelledSend;
+    try { await TeamsReplyAdapter.send(probeConfig, "Only this reply", () => ++validityChecks === 1); } catch (error) { cancelledSend = error; }
+    check("waiting for Send cancels when conversation validity changes", () => assert(probeClicks === 2 && /conversation changed/.test(cancelledSend?.message || ""), "Stale reply clicked Send"));
+    sendProbe.removeAttribute("aria-disabled");
+    const extraSend = sendProbe.cloneNode(true); probeWrapper.append(extraSend); let ambiguousSend;
+    try { await TeamsReplyAdapter.send(probeConfig, "Only this reply"); } catch (error) { ambiguousSend = error; }
+    check("multiple non-button Send matches are rejected without clicking", () => assert(probeClicks === 2 && /More than one Send control/.test(ambiguousSend?.message || ""), "Ambiguous Send target was clicked"));
+    extraSend.remove();
+    const svgSend = document.createElementNS("http://www.w3.org/2000/svg", "svg"); svgSend.setAttribute("data-send-probe", ""); svgSend.style.cssText = "width:24px;height:24px";
+    sendProbe.replaceWith(svgSend); let svgClicks = 0; svgSend.addEventListener("click", () => svgClicks++);
+    await TeamsReplyAdapter.send(probeConfig, "Only this reply");
+    check("Send icons without a native click method receive a bubbling click", () => assert(svgClicks === 1, "SVG Send icon was not clicked exactly once"));
+    const sendReport = TeamsReplyAdapter.diagnostics(probeConfig);
+    check("page checks report Send control type and disabled state without reply text", () => assert(sendReport.includes("Send control: svg role=none; disabled=false") && !sendReport.includes("Only this reply"), "Send diagnostic metadata missing or text exposed"));
+    probeWrapper.remove(); editor.textContent = "";
     document.getElementById("test-result").textContent = `PASS (${checked.length} browser checks)\n${checked.join("\n")}`;
     document.documentElement.dataset.testResult = "pass";
   } catch (error) {

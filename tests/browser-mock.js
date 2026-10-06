@@ -20,7 +20,7 @@ window.chrome = {
     return { ok: true };
   } }
 };
-document.querySelector('[data-tid="send-message"]').addEventListener("click", () => {
+testState.sendFixtureReply = () => {
   testState.sendCount++;
   if (testState.suppressEcho) { document.querySelector('[data-tid="ckeditor"]').textContent = ""; return; }
   const row = document.createElement("div");
@@ -31,4 +31,5 @@ document.querySelector('[data-tid="send-message"]').addEventListener("click", ()
   row.append(author, body);
   const list = document.querySelector('[data-tid="message-pane-list-viewport"]'); list.append(row); list.scrollTop = list.scrollHeight;
   document.querySelector('[data-tid="ckeditor"]').textContent = "";
-});
+};
+document.querySelector('[data-tid="send-message"]').addEventListener("click", testState.sendFixtureReply);
