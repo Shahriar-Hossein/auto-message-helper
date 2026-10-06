@@ -1,0 +1,7 @@
+{
+  "name": "teams-local-replies",
+  "version": "0.1.0",
+  "private": true,
+  "description": "An unpacked Chrome/Edge extension for local Qwen replies in Teams web/PWA",
+  "scripts": { "test": "node --test tests/*.test.cjs", "check": "node tools/check.cjs" }
+}

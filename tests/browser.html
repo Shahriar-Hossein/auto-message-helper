@@ -1,0 +1,15 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Local Replies DOM checks</title></head>
+<body>
+  <main data-tid="chat-pane" data-chat-id="chat-a">
+    <h1 data-tid="chat-header-title">Alice</h1>
+    <div data-tid="message-pane-list-viewport" style="height:150px;overflow-y:auto">
+      <div data-tid="chat-pane-message" data-message-id="1"><b data-tid="message-author-name">Me</b><p data-tid="message-body">Hi Alice</p></div>
+      <div data-tid="chat-pane-message" data-message-id="2"><b data-tid="message-author-name">Alice</b><p data-tid="message-body">Hello!</p></div>
+    </div>
+    <div data-tid="ckeditor" contenteditable="true" role="textbox"></div>
+    <button data-tid="send-message">Send</button>
+  </main>
+  <pre id="test-result">RUNNING</pre>
+  <script src="../extension/core.js"></script><script src="../extension/teams.js"></script>
+  <script src="browser-mock.js"></script><script src="../extension/content.js"></script><script src="browser-checks.js"></script>
+</body></html>
