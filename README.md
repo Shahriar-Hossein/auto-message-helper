@@ -57,6 +57,10 @@ Only HTTP endpoints on `localhost` or `127.0.0.1` are accepted. Model requests r
 
 **Generate now** drafts a reply to the latest incoming message, including one already present at startup or a previously failed attempt. It always creates a reviewable draft, even when Automatic send is selected. If the latest message is yours, it waits for an incoming message.
 
+While generating, the panel shows how many loaded messages it read and refreshes **Inspect loaded context** with those messages. The model receives them as conversation turns, with your earlier replies and the other person's messages assigned distinct roles, and is instructed to answer the latest message directly in its language.
+
+**Insert draft** uses the editor's plain-text paste handling when available, or a native editing command with the caret explicitly placed in the composer. It waits for Teams to process the edit before clearing the panel draft. If Teams removes or changes the inserted text, the panel retains the reply and reports the failure so you can copy it manually. This follows [CKEditor's clipboard pipeline](https://ckeditor.com/docs/ckeditor5/latest/framework/deep-dive/clipboard.html); the actual Teams editor still needs live verification.
+
 **Pause** stops monitoring and discards in-flight results. It does not remove text already inserted in Teams. Switching chats or changing settings pauses operation. Reloading Teams starts paused and requires selecting the chat again. Only one window in this browser profile can control replies; an abandoned controller lease expires after 45 seconds.
 
 ## If selectors differ

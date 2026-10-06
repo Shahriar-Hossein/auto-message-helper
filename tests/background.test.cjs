@@ -101,3 +101,19 @@ test("network requests forbid redirects and avoid credentials", async () => {
   assert.equal(h.data.ledger[0].length, 64);
   assert.equal(JSON.stringify(h.data.ledger).includes("Hello"), false);
 });
+test("the worker sends actual recent messages as the model conversation", async () => {
+  let body;
+  const h = harness(async (_url, options) => {
+    body = JSON.parse(options.body);
+    return { ok: true, json: async () => ({ message: { content: "Yes, send me the report." } }) };
+  });
+  await h.send({ type: "claim", token: "a" });
+  const messages = [
+    { id: "1", role: "other", text: "Do you have time to review the report?" },
+    { id: "2", role: "me", text: "Yes, I have time this afternoon." },
+    { id: "3", role: "other", text: "Should I send it now?\nIt is ready." }
+  ];
+  assert.equal((await h.send({ ...h.payload, messages })).ok, true);
+  assert.deepEqual(body.messages.slice(1), messages.map(m => ({ role: m.role === "me" ? "assistant" : "user", content: m.text })));
+  assert.equal(body.messages.at(-1).content, messages.at(-1).text);
+});

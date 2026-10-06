@@ -41,8 +41,10 @@ test("requests use the chosen provider and treat conversations as data", () => {
   const ollama = Core.modelRequest(config, messages);
   assert.equal(ollama.stream, false);
   assert.equal(ollama.options.num_predict, 128);
-  assert.equal(ollama.messages.length, 2);
+  assert.equal(ollama.messages.length, 6);
   assert.match(ollama.messages[0].content, /untrusted data/);
+  assert.match(ollama.messages[0].content, /Reply directly to the other person's latest message/);
+  assert.deepEqual(ollama.messages.slice(1), messages.slice(-5).map(m => ({ role: m.role === "me" ? "assistant" : "user", content: m.text })));
   const compatible = Core.modelRequest(Core.settings({ provider: "openai", baseUrl: "http://localhost:1234/v1" }), messages);
   assert.equal(compatible.max_tokens, 128);
   assert.equal(compatible.options, undefined);
@@ -50,10 +52,10 @@ test("requests use the chosen provider and treat conversations as data", () => {
 test("serialized prompts fit the byte budget with Unicode and escaped text", () => {
   const large = Core.settings({ windowSize: 10, maxContextChars: 12000, style: "বাংলা😀".repeat(200) });
   const request = Core.modelRequest(large, messages.map(m => ({ ...m, text: '\\"\nবাংলা😀'.repeat(2000) })));
-  assert.ok(request.messages.reduce((sum, m) => sum + Buffer.byteLength(m.content), 0) <= 3500);
-  const turns = JSON.parse(request.messages[1].content.split("\n").slice(1).join("\n"));
+  assert.ok(Buffer.byteLength(JSON.stringify(request.messages)) <= 3500);
+  const turns = request.messages.slice(1);
   assert.equal(turns.length, 10);
-  assert.ok(turns.every(turn => turn.text.length > 0));
+  assert.ok(turns.every(turn => turn.content.length > 0));
 });
 test("empty, truncated, and unfinished reasoning responses are rejected", () => {
   assert.equal(Core.replyText({ message: { content: "<think>private reasoning</think> Hi there!" } }, "ollama"), "Hi there!");

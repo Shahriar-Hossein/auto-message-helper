@@ -131,11 +131,40 @@
   function insert(config, reply) {
     const editor = composer(config);
     if (!composerEmpty(config)) throw new Error("Your composer already contains a draft or attachment. It was preserved.");
+    if (!Core.normalize(reply)) throw new Error("The draft is empty. Generate or enter a reply first.");
     editor.focus();
+    // Focus from the panel can leave the selection in its shadow DOM, or leave
+    // Teams with no caret at all. Bind the editing command to this composer.
+    const selection = document.getSelection();
+    const range = document.createRange();
+    range.selectNodeContents(editor);
+    range.collapse(false);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    // Let rich-text editors import plain text through their own paste pipeline
+    // so it reaches their document model, rather than only changing the DOM.
+    const clipboard = new DataTransfer();
+    clipboard.setData("text/plain", reply);
+    const paste = new ClipboardEvent("paste", { bubbles: true, cancelable: true, composed: true, clipboardData: clipboard });
+    editor.dispatchEvent(paste);
+    if (paste.defaultPrevented || Core.normalize(text(editor))) return verifyInsertion(config, editor, reply);
     // Teams' rich-text editor needs a real editing command to update its model and undo history.
-    if (!document.execCommand("insertText", false, reply)) throw new Error("Teams rejected text insertion. Copy the draft from the panel.");
-    editor.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: reply }));
-    if (Core.normalize(text(editor)) !== Core.normalize(reply)) throw new Error("Composer verification failed. Inspect it before sending.");
+    let inputFired = false;
+    const observeInput = () => { inputFired = true; };
+    editor.addEventListener("input", observeInput);
+    try { document.execCommand("insertText", false, reply); }
+    finally { editor.removeEventListener("input", observeInput); }
+    if (Core.normalize(text(editor)) !== Core.normalize(reply)) throw new Error("Teams rejected text insertion or changed the inserted text. Inspect the composer; copy your draft from the panel if needed.");
+    if (!inputFired) editor.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: reply }));
+    return verifyInsertion(config, editor, reply);
+  }
+  async function verifyInsertion(config, editor, reply) {
+    // Teams may re-render after processing an edit. Do not clear the reviewable
+    // panel draft or click Send based on a transient DOM change.
+    await new Promise(resolve => setTimeout(resolve, 350));
+    if (!editor.isConnected || composer(config) !== editor || Core.normalize(text(editor)) !== Core.normalize(reply)) {
+      throw new Error("The composer changed after insertion. Inspect Teams before sending; copy your draft from the panel if needed.");
+    }
     return editor;
   }
   function send(config, reply) {

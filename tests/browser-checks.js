@@ -1,5 +1,6 @@
 (async () => {
   const wait = () => new Promise(resolve => setTimeout(resolve, 0));
+  const settleInsertion = () => new Promise(resolve => setTimeout(resolve, 400));
   const checked = [];
   const assert = (condition, label) => { if (!condition) throw new Error(label); };
   const check = (label, action) => { action(); checked.push(label); };
@@ -59,11 +60,41 @@
       const copy = editor.cloneNode(); main.append(copy);
       fail(() => TeamsReplyAdapter.composerEmpty(testState.config), /found 2/); copy.remove();
     });
+    let inputCount = 0;
+    const countInput = () => { inputCount++; };
+    const removeCaret = () => document.getSelection().removeAllRanges();
+    editor.addEventListener("input", countInput);
+    editor.addEventListener("focus", removeCaret, { once: true });
+    $("draft").focus();
+    await TeamsReplyAdapter.insert(testState.config, "Reply with a fresh caret");
+    editor.removeEventListener("input", countInput);
+    check("insertion restores a missing caret and emits only one input event", () => {
+      assert(editor.innerText === "Reply with a fresh caret", "Missing caret prevented insertion");
+      assert(inputCount === 1, `Duplicate input events: ${inputCount}`);
+    });
+    editor.textContent = "";
+    const originalExec = document.execCommand;
+    let pasteSeen = false;
+    const handlePaste = event => {
+      event.preventDefault();
+      pasteSeen = event.clipboardData.getData("text/plain") === "Paste through the editor model" && !event.clipboardData.getData("text/html");
+      editor.textContent = event.clipboardData.getData("text/plain");
+    };
+    editor.addEventListener("paste", handlePaste, { once: true });
+    document.execCommand = () => { throw new Error("Native editing must not run after handled paste"); };
+    try { await TeamsReplyAdapter.insert(testState.config, "Paste through the editor model"); }
+    finally { document.execCommand = originalExec; }
+    check("a rich-text editor handles plain-text paste without a duplicate insertion", () => {
+      assert(pasteSeen && editor.innerText === "Paste through the editor model", "Editor paste pipeline not used");
+    });
+    editor.textContent = "";
     await click("select"); await click("start"); await tick();
     check("startup baseline ignores old messages", () => assert(genCount() === 0, "Old message generated a reply"));
     incoming("3", "Can you help?"); await tick(); testState.now += 1100; await tick();
     check("new incoming turn produces one draft", () => {
       assert(genCount() === 1 && $("draft").value === "Sounds good!", "No draft generated");
+      assert(testState.requests.filter(m => m.type === "generate").at(-1).messages.at(-1).text === "Can you help?", "Latest incoming text not sent to the worker");
+      assert($("context").textContent.includes("Can you help?"), "Generation context not refreshed");
       assert(testState.sendCount === 0 && editor.textContent === "", "Draft mode sent or inserted automatically");
     });
     await tick(); await click("dismiss"); await tick();
@@ -76,7 +107,15 @@
     resolveGeneration({ ok: true, reply: "Stale response" }); await wait(); await wait();
     check("chat switch discards in-flight generation", () => assert($("draft").value === "" && editor.textContent === "" && testState.sendCount === 0, "Stale reply used"));
     main.dataset.chatId = "chat-a"; testState.response = null; await click("select");
-    await click("generate"); await click("insert");
+    await click("generate");
+    const revertEdit = () => setTimeout(() => { editor.textContent = ""; }, 0);
+    editor.addEventListener("input", revertEdit, { once: true });
+    await click("insert"); await settleInsertion();
+    check("a composer that discards the edit keeps the reviewable panel draft", () => {
+      assert(editor.innerText === "" && $("draft").value === "Sounds good!", "Failed insertion lost the panel draft");
+      assert(!$("insert").disabled && $("status").textContent.includes("changed after insertion"), "Insertion failure not reported");
+    });
+    await click("insert"); await settleInsertion();
     check("rich-text insertion updates the composer", () => assert(editor.innerText === "Sounds good!", "Insertion failed"));
     editor.textContent = ""; await click("select");
     $("mode").value = "auto"; await click("start");

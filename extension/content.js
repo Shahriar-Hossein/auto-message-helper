@@ -60,7 +60,7 @@
   }
   function insertReply(reply) {
     inserting = true;
-    try { Teams.insert(config, reply); }
+    try { return Teams.insert(config, reply); }
     finally { inserting = false; }
   }
   function current() {
@@ -89,7 +89,8 @@
     const version = epoch, revision = userRevision;
     busy = true;
     $("pause").disabled = false; $("start").disabled = true;
-    status("Generating locally…");
+    inspect(snapshot);
+    status(`Generating locally from ${snapshot.messages.length} loaded messages…`);
     try {
       await request({ type: "claim" });
       if (version !== epoch) return;
@@ -105,8 +106,13 @@
       }
       if (!manual && running && selectedMode === "auto") {
         // Revalidate after Teams has processed editor changes and enabled its Send button.
-        insertReply(reply);
-        await new Promise(resolve => setTimeout(resolve, 350));
+        try { await insertReply(reply); }
+        catch (error) {
+          if (version === epoch) {
+            $("draft").value = reply; draftSnapshot = snapshot; $("insert").disabled = false;
+          }
+          throw error;
+        }
         if (version !== epoch || !running || revision !== userRevision || !Core.isFresh(snapshot, current())) {
           throw new Error("The conversation changed after insertion. Review the unsent composer draft.");
         }
@@ -174,10 +180,18 @@
   });
   act("pause", () => pause());
   act("generate", () => generate(true));
-  act("insert", () => {
+  act("insert", async () => {
     if (!draftSnapshot || !Core.isFresh(draftSnapshot, current())) throw new Error("This draft is stale. Dismiss it and generate a new one.");
-    insertReply($("draft").value.trim()); clearDraft();
-    status("Inserted into Teams. Review it and press Teams Send.");
+    const snapshot = draftSnapshot, reply = $("draft").value.trim(), version = epoch;
+    $("insert").disabled = true;
+    try {
+      await insertReply(reply);
+      if (version !== epoch || draftSnapshot !== snapshot) return;
+      if ($("draft").value.trim() === reply) clearDraft();
+      status("Inserted into Teams. Review it and press Teams Send.");
+    } finally {
+      $("insert").disabled = !draftSnapshot;
+    }
   });
   act("dismiss", () => { clearDraft(); status(running ? "Draft dismissed. Watching for new messages." : "Draft dismissed."); });
   act("collapse", () => {
