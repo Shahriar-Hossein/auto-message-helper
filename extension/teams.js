@@ -438,17 +438,25 @@
     throw new Error("Could not confirm the unread conversation. Check Teams selectors or chat loading.");
   }
   function composer(config) { return one(config.selectors.composer, "message composer"); }
-  function composerEmpty(config) {
-    const editor = composer(config);
+  function composerAttachments(config, editor) {
     const queuedAttachments = all('[data-tid="attachment-card"], [data-tid="compose-attachment"]')
       .filter(node => !node.closest(config.selectors.row) && !node.closest('[data-tid="chat-pane-item"]'));
-    return !Core.normalize(text(editor)) && !editor.querySelector('img, [data-attachment-id], [contenteditable="false"]') &&
-      queuedAttachments.length === 0;
+    return !!editor.querySelector('img, [data-attachment-id], [contenteditable="false"]') || queuedAttachments.length > 0;
   }
-  function insert(config, reply) {
+  function composerEmpty(config) {
+    const editor = composer(config);
+    return !Core.normalize(text(editor)) && !composerAttachments(config, editor);
+  }
+  function insert(config, reply, onInserted = () => {}) {
     const editor = composer(config);
     if (!composerEmpty(config)) throw new Error("Your composer already contains a draft or attachment. It was preserved.");
     if (!Core.normalize(reply)) throw new Error("The draft is empty. Generate or enter a reply first.");
+    const verify = () => {
+      if (Core.normalize(text(editor)) === Core.normalize(reply) && !composerAttachments(config, editor)) {
+        onInserted({ editor, html: editor.innerHTML, reply });
+      }
+      return verifyInsertion(config, editor, reply);
+    };
     editor.focus();
     // Focus from the panel can leave the selection in its shadow DOM, or leave
     // Teams with no caret at all. Bind the editing command to this composer.
@@ -464,7 +472,7 @@
     clipboard.setData("text/plain", reply);
     const paste = new ClipboardEvent("paste", { bubbles: true, cancelable: true, composed: true, clipboardData: clipboard });
     editor.dispatchEvent(paste);
-    if (paste.defaultPrevented || Core.normalize(text(editor))) return verifyInsertion(config, editor, reply);
+    if (paste.defaultPrevented || Core.normalize(text(editor))) return verify();
     // Teams' rich-text editor needs a real editing command to update its model and undo history.
     let inputFired = false;
     const observeInput = () => { inputFired = true; };
@@ -473,7 +481,23 @@
     finally { editor.removeEventListener("input", observeInput); }
     if (Core.normalize(text(editor)) !== Core.normalize(reply)) throw new Error("Teams rejected text insertion or changed the inserted text. Inspect the composer; copy your draft from the panel if needed.");
     if (!inputFired) editor.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", data: reply }));
-    return verifyInsertion(config, editor, reply);
+    return verify();
+  }
+  async function clearOwned(config, receipt, valid = () => true) {
+    // Only remove a draft from this insertion, never a matching human draft or
+    // an editor that Teams replaced. Exact markup also protects whitespace edits.
+    const untouched = () => valid() && receipt?.editor.isConnected && composer(config) === receipt.editor &&
+      receipt.editor.innerHTML === receipt.html && !composerAttachments(config, receipt.editor);
+    if (!untouched()) return false;
+    const editor = receipt.editor;
+    editor.focus();
+    const range = document.createRange(); range.selectNodeContents(editor);
+    const selection = document.getSelection(); selection.removeAllRanges(); selection.addRange(range);
+    if (!untouched()) return false;
+    // Use the editor's editing pipeline so its document model is cleared too.
+    document.execCommand("delete", false);
+    await delay(350);
+    return valid() && editor.isConnected && composer(config) === editor && composerEmpty(config);
   }
   async function verifyInsertion(config, editor, reply) {
     // Teams may re-render after processing an edit. Do not clear the reviewable
@@ -492,7 +516,7 @@
   function sendDisabled(control) {
     return !!control.disabled || control.matches(":disabled") || !!control.closest('[disabled], [aria-disabled="true"], [inert]');
   }
-  async function send(config, reply, valid = () => true) {
+  async function send(config, reply, valid = () => true, onClick = () => {}) {
     // Send may become enabled after the editor's state catches up with its DOM.
     let reason = "No visible Send control matched. Check the Send selector.";
     for (let attempt = 0; attempt < 50; attempt++) {
@@ -501,6 +525,7 @@
       if (controls.length > 1) throw new Error("More than one Send control matched. Update the Send selector.");
       const control = controls[0];
       if (control && !sendDisabled(control)) {
+        onClick();
         // Personal Teams may put the click handler directly on a div/span or SVG
         // rather than expose a native button or an accessible button role.
         if (typeof control.click === "function") control.click();
@@ -578,5 +603,5 @@
     } catch (error) { report.push(`Row inspection failed: ${error.message}`); }
     return report.join("\n");
   }
-  root.TeamsReplyAdapter = { snapshot, recentHistory, captureMedia, unreadChats, scanUnread, openUnread, composerEmpty, insert, send, diagnostics };
+  root.TeamsReplyAdapter = { snapshot, recentHistory, captureMedia, unreadChats, scanUnread, openUnread, composerEmpty, insert, clearOwned, send, diagnostics };
 })(globalThis);

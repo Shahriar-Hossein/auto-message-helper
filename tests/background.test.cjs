@@ -138,6 +138,28 @@ test("saved attempt checks skip previous replies without inference", async () =>
   assert.equal((await h.send({ ...h.payload, type: "attempted" })).attempted, true);
   assert.equal(h.requests(), 1);
 });
+test("a pending incoming ID can be answered after an outgoing echo without reordering context", async () => {
+  let body;
+  const h = harness(async (_url, options) => {
+    body = JSON.parse(options.body);
+    return { ok: true, json: async () => ({ message: { content: "Answer to the new question" } }) };
+  });
+  await h.send({ type: "claim", token: "a" });
+  const messages = [{ id: "old", role: "other", text: "First question" },
+    { id: "pending", role: "other", text: "One more question" }, { id: "out", role: "me", text: "Answer to the first question" }];
+  for (const replyTo of [undefined, "missing", "out", "old", 12, null]) {
+    assert.equal((await h.send({ ...h.payload, messages, replyTo })).ok, false);
+  }
+  const payload = { ...h.payload, messages, replyTo: "pending" };
+  assert.equal((await h.send({ ...payload, type: "attempted" })).attempted, false);
+  assert.equal((await h.send(payload)).ok, true);
+  assert.match(body.messages[0].content, /later assistant turn answered earlier messages/);
+  assert.match(body.messages[2].content, /\[Unanswered incoming message\]\nOne more question/);
+  assert.equal(body.messages[3].content, "Answer to the first question");
+  assert.equal((await h.send({ ...payload, type: "attempted" })).attempted, true);
+  assert.equal((await h.send(payload)).ok, false);
+  assert.equal(h.requests(), 1);
+});
 test("a reloaded document can reclaim its own tab without displacing another tab", async () => {
   const h = harness();
   await h.send({ type: "claim", token: "a" }, { ...h.sender, documentId: "old" });

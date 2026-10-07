@@ -20,7 +20,7 @@
     details{margin-top:10px}pre{white-space:pre-wrap;max-height:180px;overflow:auto;background:#151827;padding:8px;border-radius:7px}
     [hidden]{display:none!important}small{color:#b8bfd7}
   </style><section aria-label="Teams Local Replies">
-    <header><strong>Local Replies <small>v0.2.10</small></strong><button id="collapse" aria-label="Collapse panel">−</button></header>
+    <header><strong>Local Replies <small>v0.2.11</small></strong><button id="collapse" aria-label="Collapse panel">−</button></header>
     <div id="controls">
       <p id="selected">No chat selected</p><p id="status" role="status">Paused. Open Settings to configure your model and name.</p>
       <div class="row"><button id="settings">Settings</button><button class="primary" id="select">Select this chat</button><button id="diagnose">Check Teams page</button></div>
@@ -48,6 +48,17 @@
   const unsupportedChats = new Set();
   let scanDue = 0, lastUnreadCount = 0;
   const marks = new Map();
+  const unanswered = new Map();
+  function withPending(snapshot) {
+    const pending = unanswered.get(snapshot.identity);
+    if (!pending || snapshot.messages.at(-1)?.role === "other") return snapshot;
+    // A subsequent human reply takes precedence over the bot's pending work.
+    if (snapshot.messages.at(-1)?.id !== pending.outgoingId) {
+      unanswered.delete(snapshot.identity); return snapshot;
+    }
+    const source = snapshot.messages.filter(m => m.role === "other" && pending.ids.has(m.id)).at(-1);
+    return source ? { ...snapshot, replyTo: source.id } : snapshot;
+  }
   async function saveMonitor() { await chrome.storage.local.set({ monitor }); }
   function bind(snapshot) {
     selected = snapshot;
@@ -79,9 +90,9 @@
     waitingForBottom = true;
     status("Waiting for the bottom of this chat. Automatic replies resume there.");
   }
-  async function insertReply(reply) {
+  async function insertReply(reply, onInserted) {
     inserting = true;
-    try { return await Teams.insert(config, reply); }
+    try { return await Teams.insert(config, reply, onInserted); }
     finally { inserting = false; }
   }
   function current(requireBottom = true) {
@@ -89,7 +100,7 @@
     const result = Teams.snapshot(Core.conversationConfig(config, selected.isGroup));
     if (result.identity !== selected.identity || result.title !== selected.title) throw new Error("The selected conversation changed. Select it again before starting.");
     if (requireBottom && !result.atBottom) throw new Error(result.hasScroller ? "Scroll to the bottom of the chat before continuing." : "Cannot identify the message scroller. Update its selector in Settings.");
-    return result;
+    return withPending(result);
   }
   function inspect(snapshot) {
     $("copy-report").hidden = true;
@@ -119,6 +130,8 @@
     if (state === "edited") throw new Error("This draft is stale because its original message or sender changed. Dismiss it and generate a new one.");
   }
   async function deliver(snapshot, reply, version, revision, manual, reviewed = false) {
+    reply = Core.plainReply(reply);
+    let receipt = null, clicked = false;
     const fresh = () => {
       if (version !== epoch || !manual && !running || revision !== userRevision) return false;
       if (snapshot.isGroup) {
@@ -132,16 +145,48 @@
     try {
       if (!fresh()) throw new Error("The conversation changed before insertion. Generate a new reply.");
       status("Inserting reply into Teams…");
-      await insertReply(reply);
+      await insertReply(reply, value => { receipt = value; });
       if (!fresh()) throw new Error("The conversation changed after insertion. Review the unsent composer draft.");
       await request({ type: "heartbeat" });
       if (!fresh()) throw new Error("Sending was cancelled. Review the composer draft.");
       status("Sending reply through Teams…");
-      await Teams.send(config, reply, fresh);
-      pendingDelivery = { reply, waiting: true, started: Date.now(), snapshot };
+      await Teams.send(config, reply, fresh, () => {
+        clicked = true;
+        pendingDelivery = { reply, waiting: true, started: Date.now(), snapshot };
+      });
       clearDraft();
       status("Send clicked. Waiting for the outgoing message…");
     } catch (error) {
+      // A click can have taken effect even if its handler throws. Verify the
+      // outgoing message instead of clearing its draft or risking another click.
+      if (clicked) { clearDraft(); status("Send attempted. Waiting for the outgoing message…"); return; }
+      if ((manual || running) && version === epoch && revision === userRevision) {
+        try {
+          const latest = current(false), source = Core.replySource(latest);
+          if (source?.role === "other" && source.id !== Core.replySource(snapshot)?.id) {
+            const valid = () => version === epoch && (manual || running) && revision === userRevision &&
+              (!snapshot.isGroup || ["ready", "updated"].includes(Core.groupDraftState(snapshot, current(false)))) &&
+              current(false).identity === snapshot.identity;
+            let cleared = Teams.composerEmpty(config);
+            if (!cleared && receipt) {
+              inserting = true;
+              try { cleared = await Teams.clearOwned(config, receipt, valid); }
+              finally { inserting = false; }
+            }
+            if (cleared && valid()) {
+              if (manual) {
+                keepDraft(snapshot, reply);
+                status("New messages arrived. Removed the unchanged bot draft; review the panel reply or generate a new one.");
+                return;
+              }
+              clearDraft(); baseline = Core.fingerprint(latest); marks.set(latest.identity, baseline);
+              due = Date.now() + config.debounceMs;
+              status("New messages arrived. Removed the unchanged bot draft; preparing a fresh reply.");
+              return;
+            }
+          }
+        } catch { /* Preserve unknown or human-owned composer content. */ }
+      }
       if (version === epoch) { keepDraft(snapshot, reply); showPageCheck(error); }
       throw new Error(`${manual ? "Send" : "Automatic send"} stopped: ${error.message}`);
     }
@@ -156,7 +201,7 @@
       return;
     }
     if (replyMode === "auto" && !snapshot.chatId && !snapshot.isGroup) throw new Error("Automatic sending requires a stable conversation identity.");
-    if (snapshot.messages.at(-1).role !== "other" && !(manual && snapshot.isGroup)) throw new Error("The latest message is yours. Waiting for the other person.");
+    if (Core.replySource(snapshot)?.role !== "other" && !(manual && snapshot.isGroup)) throw new Error("The latest message is yours. Waiting for the other person.");
     if (!Teams.composerEmpty(config)) throw new Error("Your composer contains a draft or attachment. It was preserved.");
     const version = epoch, revision = userRevision;
     busy = true;
@@ -168,7 +213,7 @@
       if (version !== epoch) return;
       const history = await Teams.recentHistory(Core.conversationConfig(config, snapshot.isGroup), () => version === epoch && revision === userRevision);
       snapshot = current(!snapshot.isGroup);
-      if (snapshot.messages.at(-1).role !== "other") throw new Error("The latest message is yours. Waiting for the other person.");
+      if (Core.replySource(snapshot)?.role !== "other") throw new Error("The latest message is yours. Waiting for the other person.");
       const lastContext = history.at(-1), lastLoaded = snapshot.messages.at(-1);
       if (lastContext?.id !== lastLoaded?.id || lastContext?.text !== lastLoaded?.text ||
           (!snapshot.isGroup && !Core.isFresh(snapshot, current())) || revision !== userRevision || !Teams.composerEmpty(config)) {
@@ -176,9 +221,10 @@
       }
       inspect({ ...snapshot, messages: history });
       status(`Generating locally from ${history.length} recent messages, including media…`);
-      const { reply } = await request({ type: "generate", identity: snapshot.identity,
+      const response = await request({ type: "generate", identity: snapshot.identity, replyTo: snapshot.replyTo,
         isGroup: snapshot.isGroup,
         messages: history.map(({ id, text, role, author, media }) => ({ id, text: text.slice(0, Core.conversationConfig(config, snapshot.isGroup).maxContextChars), role, author, ...(media?.length ? { media } : {}) })), manual });
+      const reply = Core.plainReply(response.reply);
       if (version !== epoch) return;
       const latest = current(!snapshot.isGroup);
       if (snapshot.isGroup) {
@@ -199,7 +245,7 @@
             if (manual) status("Group reply kept as a draft. Scroll to the latest messages and review it before Send reply.");
             else waitForBottom();
           } else if (replyMode === "auto" && !Core.groupSendFresh(snapshot, latest)) {
-            status(!manual && latest.messages.at(-1)?.id !== snapshot.messages.at(-1)?.id ?
+            status(!manual && Core.replySource(latest)?.id !== Core.replySource(snapshot)?.id ?
               "New messages arrived. Preparing a fresh automatic reply after the conversation settles." :
               "Group reply kept as a draft. New messages or message content changed during generation; review it before Send reply.");
           } else if (state === "updated") {
@@ -268,6 +314,7 @@
     try { snapshot = scope === "selected" ? current(false) : Teams.snapshot(config); }
     catch (error) { if (scope === "selected") throw error; }
     if (snapshot) {
+      snapshot = withPending(snapshot);
       if (scope === "selected" && !snapshot.hasScroller) throw new Error("Cannot identify the message scroller. Update its selector in Settings.");
       if (selectedMode === "auto" && !snapshot.isGroup && !snapshot.chatId && scope === "selected") throw new Error("Automatic sending requires a stable conversation identity (chat ID or one-to-one participant ID). Draft mode is available.");
       if (scope === "selected" && !Teams.composerEmpty(config)) throw new Error("Clear or send your existing Teams draft before starting.");
@@ -281,7 +328,7 @@
     running = true; resumePending = false; epoch++; due = 0;
     if (snapshot) {
       bind(snapshot); baseline = Core.fingerprint(snapshot); marks.set(snapshot.identity, baseline);
-      if (resuming && snapshot.messages.at(-1)?.role === "other") due = Date.now() + config.debounceMs;
+      if (resuming && Core.replySource(snapshot)?.role === "other") due = Date.now() + config.debounceMs;
     }
     $("mode").value = selectedMode; $("scope").value = scope;
     $("start").disabled = true; $("pause").disabled = false; $("mode").disabled = true; $("scope").disabled = true;
@@ -316,12 +363,12 @@
   });
   act("insert", async () => {
     reviewedDraft(draftSnapshot, current(!draftSnapshot?.isGroup));
-    const snapshot = draftSnapshot, reply = $("draft").value.trim(), version = epoch;
+    const snapshot = draftSnapshot, reply = Core.plainReply($("draft").value), version = epoch;
     $("insert").disabled = true;
     try {
       await insertReply(reply);
       if (version !== epoch || draftSnapshot !== snapshot) return;
-      if ($("draft").value.trim() === reply) clearDraft();
+      if (Core.plainReply($("draft").value) === reply) clearDraft();
       status("Inserted into Teams. Review it and press Teams Send.");
     } finally {
       $("insert").disabled = !draftSnapshot;
@@ -401,8 +448,9 @@
           unreadSeen.set(target.key, { signature: target.signature, until: Date.now() + 5000 });
         } else unreadSeen.delete(target.key);
         if (!opened.chatId && selectedMode === "auto") { status("Skipped an unread chat without a stable conversation identity."); continue; }
-        bind(opened); baseline = Core.fingerprint(opened); marks.set(opened.identity, baseline);
-        due = opened.messages.at(-1)?.role === "other" ? Date.now() + config.debounceMs : 0;
+        const latest = withPending(opened);
+        bind(latest); baseline = Core.fingerprint(latest); marks.set(latest.identity, baseline);
+        due = Core.replySource(latest)?.role === "other" ? Date.now() + config.debounceMs : 0;
         inspect(opened);
         status(due ? `Unread chat opened. Preparing a reply (${unreadQueue.size} more queued)…` : `Unread chat has no unanswered incoming message (${unreadQueue.size} more queued).`);
         return true;
@@ -432,7 +480,7 @@
       if (!running && !pendingDelivery?.waiting) return;
       let snapshot;
       if (running && monitor.scope === "all" && !pendingDelivery && !busy) {
-        try { snapshot = Teams.snapshot(config); }
+        try { snapshot = withPending(Teams.snapshot(config)); }
         catch {
           due = 0;
           selected = null; $("generate").disabled = true; $("preview").disabled = true; $("selected").textContent = "Waiting for an unread direct chat";
@@ -441,7 +489,7 @@
         if (snapshot.isGroup) { due = 0; await navigateUnread(); return; }
         if (!selected || snapshot.identity !== selected.identity) {
           bind(snapshot); baseline = marks.get(snapshot.identity) || Core.fingerprint(snapshot);
-          due = snapshot.messages.at(-1)?.role === "other" ? Date.now() + config.debounceMs : 0;
+          due = Core.replySource(snapshot)?.role === "other" ? Date.now() + config.debounceMs : 0;
         }
         if (!Teams.composerEmpty(config)) { status("Unread chats are queued; waiting for your Teams draft to be cleared."); return; }
         if (!snapshot.atBottom) {
@@ -450,11 +498,24 @@
         if (selectedMode === "auto" && !snapshot.chatId) { status("Waiting for a direct chat with a stable conversation identity."); await navigateUnread(); return; }
       } else snapshot = current(false);
       if (pendingDelivery) {
-        const delivered = snapshot.messages.some(m => m.role === "me" &&
+        const delivered = snapshot.messages.find(m => m.role === "me" &&
           !pendingDelivery.snapshot.messages.some(old => old.id === m.id) && Core.normalize(m.text) === Core.normalize(pendingDelivery.reply));
         if (delivered) {
+          const previous = pendingDelivery.snapshot;
+          const ids = new Set(unanswered.get(snapshot.identity)?.ids || []);
+          for (const message of previous.messages) ids.delete(message.id);
+          const covered = new Set(previous.messages.map(m => m.id));
+          const boundary = snapshot.messages.findLastIndex(m => covered.has(m.id));
+          // Earlier virtualized rows being loaded are not new incoming work.
+          for (const message of snapshot.messages.slice(boundary < 0 ? snapshot.messages.indexOf(delivered) + 1 : boundary + 1)) {
+            if (message.role === "other" && !covered.has(message.id)) ids.add(message.id);
+          }
+          if (ids.size) unanswered.set(snapshot.identity, { ids, outgoingId: delivered.id });
+          else unanswered.delete(snapshot.identity);
+          if (unanswered.size > 500) unanswered.delete(unanswered.keys().next().value);
+          snapshot = withPending(snapshot);
           pendingDelivery = null; baseline = Core.fingerprint(snapshot); marks.set(snapshot.identity, baseline);
-          due = snapshot.messages.at(-1).role === "other" ? Date.now() + config.debounceMs : 0;
+          due = Core.replySource(snapshot)?.role === "other" ? Date.now() + config.debounceMs : 0;
           if (!running) pause("Reply appeared in the conversation.");
           else status("Reply appeared in the conversation. Watching for new messages.");
         }
@@ -478,9 +539,9 @@
         const saved = automaticDraft;
         if ($("draft").value !== saved.reply || saved.revision !== userRevision) automaticDraft = null;
         else {
-          if (snapshot.messages.at(-1)?.id !== saved.snapshot.messages.at(-1)?.id) {
+          if (Core.replySource(snapshot)?.id !== Core.replySource(saved.snapshot)?.id) {
             clearDraft();
-            due = snapshot.messages.at(-1)?.role === "other" ? Date.now() + config.debounceMs : 0;
+            due = Core.replySource(snapshot)?.role === "other" ? Date.now() + config.debounceMs : 0;
             status("Replaced an outdated automatic draft. Watching the latest messages.");
           } else if (Core.groupSendFresh(saved.snapshot, snapshot)) {
             busy = true;
@@ -493,14 +554,14 @@
       const mark = Core.fingerprint(snapshot);
       if (mark !== baseline) {
         baseline = mark; marks.set(snapshot.identity, mark);
-        due = snapshot.messages.at(-1).role === "other" ? Date.now() + config.debounceMs : 0;
+        due = Core.replySource(snapshot)?.role === "other" ? Date.now() + config.debounceMs : 0;
       }
       if (!due && running && monitor.scope === "all" && !$("draft").value.trim()) {
         if (await navigateUnread()) return;
       }
       if (due && Date.now() >= due && !busy && !$("draft").value.trim()) {
         due = 0;
-        const probe = await request({ type: "attempted", identity: snapshot.identity,
+        const probe = await request({ type: "attempted", identity: snapshot.identity, replyTo: snapshot.replyTo,
           isGroup: snapshot.isGroup,
           messages: snapshot.messages.map(({ id, text, role, author }) => ({ id, text: text.slice(0, Core.conversationConfig(config, snapshot.isGroup).maxContextChars), role, author })) });
         if (!probe.attempted) await generate();

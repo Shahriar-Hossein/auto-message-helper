@@ -115,10 +115,16 @@ async function handle(message, sender) {
     config.isGroup && !m.author ||
     !["me", "other"].includes(m.role) || m.media !== undefined && (!Array.isArray(m.media) || m.media.length > 4 || m.media.some(item =>
       !item || !["image", "GIF", "attachment"].includes(item.kind) || typeof item.label !== "string" || item.label.length > 500 ||
-      item.data !== undefined && (typeof item.data !== "string" || item.data.length > 200000 || !/^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(item.data))))) || messages.at(-1)?.role !== "other" ||
+      item.data !== undefined && (typeof item.data !== "string" || item.data.length > 200000 || !/^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(item.data))))) ||
     typeof message.identity !== "string" || message.identity.length > 1000) throw new Error("Invalid conversation window.");
+  const source = Core.replySource(message);
+  if (source?.role !== "other" || message.replyTo !== undefined &&
+      (typeof message.replyTo !== "string" || messages.filter(m => m.role === "other").at(-1)?.id !== message.replyTo)) {
+    throw new Error("Invalid conversation window.");
+  }
+  config.replyTo = message.replyTo;
   if (messages.flatMap(m => m.media || []).reduce((sum, item) => sum + (item.data?.length || 0), 0) > 2000000) throw new Error("Image context is too large.");
-  const key = await digest(JSON.stringify([message.identity, messages.at(-1).id, messages.at(-1).text]));
+  const key = await digest(JSON.stringify([message.identity, source.id, source.text]));
   if (message.type === "attempted") {
     await serial(() => ownership(sender, message.token));
     const { ledger = [] } = await chrome.storage.local.get("ledger");

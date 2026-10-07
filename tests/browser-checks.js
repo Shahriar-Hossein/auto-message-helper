@@ -663,8 +663,8 @@
     pwaSend.setAttribute("aria-disabled", "true");
     await click("generate");
     groupMessage("group-after-insert", "Kajal", "Changed while Send was disabled");
-    pwaSend.setAttribute("aria-disabled", "false"); await new Promise(resolve => setTimeout(resolve, 400));
-    check("Generate and send rechecks group freshness while waiting for Send", () => assert(testState.sendCount === groupSends + 6 && $("draft").value && $("status").textContent.includes("conversation changed"), "Generated group reply sent after a newer message arrived during insertion"));
+    pwaSend.setAttribute("aria-disabled", "false"); await new Promise(resolve => setTimeout(resolve, 600));
+    check("Generate and send removes its unchanged group composer draft when a newer message arrives", () => assert(testState.sendCount === groupSends + 6 && $("draft").value && TeamsReplyAdapter.composerEmpty(testState.config) && $("status").textContent.includes("Removed"), "Generated group reply was sent or left blocking the composer after a newer message arrived"));
     editor.textContent = ""; await click("dismiss");
     main.dataset.chatType = "channel";
     check("channels remain excluded", () => fail(() => TeamsReplyAdapter.snapshot(testState.config), /channels are not supported/));

@@ -3,6 +3,30 @@ const assert = require("node:assert/strict");
 const Core = require("../extension/core.js");
 const config = Core.settings();
 const messages = Array.from({ length: 24 }, (_, i) => ({ id: String(i), role: i % 2 ? "other" : "me", text: `Message ${i}` }));
+test("plain replies retain JSON/code content without activating Markdown fences", () => {
+  const json = '{\n  "response": "Ready 😄",\n  "count": 2\n}';
+  assert.equal(Core.replyText({ message: { content: '```json\n' + json + '\n```' } }, "ollama"), json);
+  assert.equal(Core.plainReply('Here is code:\n~~~python\nif ready:\n    print("ok")\n~~~\nUse `ready`.'), 'Here is code:\nif ready:\n    print("ok")\nUse `ready`.');
+  assert.equal(Core.plainReply('```json\r\n' + json + '\r\n```'), json);
+  assert.equal(Core.plainReply('Keep ```inline content``` and "```".'), 'Keep ```inline content``` and "```".');
+  assert.throws(() => Core.plainReply("```\n```"), /empty/);
+});
+test("an explicitly pending incoming turn stays fresh after a confirmed bot reply", () => {
+  const snapshot = { identity: "chat", title: "Chat", isGroup: false, atBottom: true, replyTo: "pending",
+    messages: [{ id: "pending", role: "other", author: "Alice", text: "One more question" }, { id: "out", role: "me", text: "Reply to earlier messages" }] };
+  assert.equal(Core.replySource(snapshot).id, "pending");
+  assert.equal(Core.isFresh(snapshot, structuredClone(snapshot)), true);
+  assert.equal(Core.isFresh(snapshot, { ...snapshot, replyTo: undefined }), false);
+  const changed = structuredClone(snapshot); changed.messages.push({ id: "new", role: "other", text: "A newer question" }); changed.replyTo = undefined;
+  assert.equal(Core.isFresh(snapshot, changed), false);
+  const group = { ...snapshot, isGroup: true };
+  assert.equal(Core.groupSendFresh(group, structuredClone(group)), true);
+  assert.equal(Core.groupSendFresh(group, { ...changed, isGroup: true }), false);
+  const request = Core.modelRequest({ ...config, replyTo: "pending" }, snapshot.messages);
+  assert.match(request.messages[1].content, /\[Unanswered incoming message\]/);
+  assert.equal(request.messages[2].role, "assistant");
+  assert.equal(request.messages[2].content, snapshot.messages[1].text);
+});
 test("recent context preserves chronological order and both sender labels", () => {
   const window = Core.contextWindow(messages, config);
   assert.deepEqual(window.map(m => m.text), messages.slice(-20).map(m => m.text));
