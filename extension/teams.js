@@ -117,13 +117,29 @@
       (row.getAttribute("data-is-own-message") === "true" ? config.selfName : ""));
   }
   function scrollerFor(lastRow, config) {
-    const matches = all(config.selectors.scroller);
-    const containing = matches.filter(node => node.contains(lastRow));
-    if (containing.length) return containing.at(-1);
+    const containing = all(config.selectors.scroller).filter(node => node.contains(lastRow));
+    const candidates = [];
     for (let node = lastRow?.parentElement; node && node !== document.body; node = node.parentElement) {
-      if (/auto|scroll/.test(getComputedStyle(node).overflowY) && node.clientHeight > 0) return node;
+      const overflow = getComputedStyle(node).overflowY;
+      if (node.clientHeight > 0 && (/auto|scroll|overlay/.test(overflow) || containing.includes(node) && overflow === "hidden")) candidates.push(node);
     }
-    return null;
+    // A selector can name the unscrollable inner list as well as its viewport.
+    // Prefer the nearest ancestor with a real scroll range, then a short viewport.
+    const hasRange = node => node.scrollHeight - node.clientHeight > 1;
+    return candidates.find(node => containing.includes(node) && hasRange(node)) || candidates.find(hasRange) ||
+      candidates.find(node => containing.includes(node)) || candidates[0] ||
+      containing.find(node => node.clientHeight > 0 && !hasRange(node)) || null;
+  }
+  function reverseScroller(scroller) {
+    return getComputedStyle(scroller).flexDirection === "column-reverse";
+  }
+  function atBottom(scroller) {
+    return !!scroller && (reverseScroller(scroller) ? Math.abs(scroller.scrollTop) :
+      scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop) < 80;
+  }
+  function scrollEdge(scroller, latest) {
+    scroller.scrollTop = reverseScroller(scroller) ? latest ? 0 : -scroller.scrollHeight : latest ? scroller.scrollHeight : 0;
+    scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
   }
   function snapshot(config, limit) {
     if (!config.selfName) throw new Error("Set your exact Teams display name in Settings first.");
@@ -164,7 +180,7 @@
     const scroller = scrollerFor(lastTextRow, config);
     return {
       title, chatId, isGroup, identity: JSON.stringify([location.origin, chatId || title]), messages: bounded,
-      atBottom: !!scroller && scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop < 80,
+      atBottom: atBottom(scroller),
       hasScroller: !!scroller
     };
   }
@@ -172,8 +188,7 @@
   async function latestViewport(config, scroller, identity, valid) {
     let previous = "", settled = 0, latest;
     for (let step = 0; step < 8 && valid(); step++) {
-      scroller.scrollTop = scroller.scrollHeight;
-      scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
+      scrollEdge(scroller, true);
       await delay(150);
       if (!valid()) throw new Error("History loading was cancelled.");
       latest = snapshot(config);
@@ -204,7 +219,7 @@
       for (let step = 0; collected.length < config.windowSize && step < 8 && scroller; step++) {
         if (!valid()) throw new Error("History loading was cancelled.");
         const previous = collected.length;
-        scroller.scrollTop = 0; scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
+        scrollEdge(scroller, false);
         await delay(250);
         const older = snapshot(config, config.windowSize);
         if (older.identity !== initial.identity) throw new Error("The conversation changed while loading history.");
@@ -546,6 +561,9 @@
     try {
       const rows = all(config.selectors.row);
       report.push("", `Message containers: ${rows.length}`);
+      const scroller = scrollerFor(rows.at(-1), config);
+      report.push(`Resolved message scroller: ${scroller ? metadata(scroller) : "none"}`);
+      if (scroller) report.push(`Scroller dimensions: height=${scroller.clientHeight}; content=${scroller.scrollHeight}; offset=${Math.round(scroller.scrollTop)}; reversed=${reverseScroller(scroller)}; at bottom=${atBottom(scroller)}`);
       for (const row of rows.slice(-3)) {
         const nodes = [row, ...row.querySelectorAll('[data-tid], [role], [contenteditable]')];
         report.push("Row structure:", ...nodes.slice(0, 25).map(metadata));
