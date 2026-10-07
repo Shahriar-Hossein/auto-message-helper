@@ -6,7 +6,7 @@ const { tmpdir } = require("node:os");
 const path = require("node:path");
 const { pathToFileURL } = require("node:url");
 const browser = process.env.TEAMS_TEST_BROWSER || ["/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser"].find(existsSync);
-for (const fixture of ["browser.html", "browser-recovery.html"]) test(`real Chromium DOM: ${fixture}`, { skip: browser ? false : "Chrome/Chromium not installed; open tests/browser.html manually", timeout: 60000 }, () => {
+for (const fixture of ["browser.html", "browser-recovery.html", "browser-moods.html"]) test(`real Chromium DOM: ${fixture}`, { skip: browser ? false : "Chrome/Chromium not installed; open tests/browser.html manually", timeout: 60000 }, () => {
   const profile = mkdtempSync(path.join(tmpdir(), "teams-replies-browser-"));
   try {
     const result = spawnSync(browser, ["--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--no-first-run", "--disable-background-networking",

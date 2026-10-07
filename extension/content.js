@@ -18,12 +18,20 @@
     p{margin:6px 0;overflow-wrap:anywhere}#status{color:#c8cdec}#selected{color:#a9f0ce}
     textarea{box-sizing:border-box;width:100%;height:100px;resize:vertical;background:#151827;color:#fff;border:1px solid #555b7c;border-radius:7px;padding:8px;font:inherit}
     details{margin-top:10px}pre{white-space:pre-wrap;max-height:180px;overflow:auto;background:#151827;padding:8px;border-radius:7px}
+    #moods{border:0;padding:0;margin:10px 0 4px;min-width:0}#moods legend{padding:0;margin-bottom:5px;font-weight:600}
+    .mood-grid{display:grid;grid-template-columns:1fr 1fr;gap:6px}.mood-choice{position:relative;gap:6px;padding:7px;border:1px solid #555b7c;border-radius:8px;background:#292d43;cursor:pointer}
+    .mood-choice:has(input:checked){background:#403769;border-color:#b0a2ff}.mood-choice:focus-within{outline:2px solid #c9bfff;outline-offset:2px}
+    .mood-choice input{position:absolute;opacity:0;width:1px;height:1px}.mood-choice img{width:28px;height:28px;object-fit:contain;flex:none}
+    .mood-choice span{min-width:0}.mood-choice b{display:block;font-size:12px}.mood-choice small{display:block;font-size:10px}
+    #moods:disabled{opacity:.6}#moods:disabled label{cursor:wait}#mood-status{font-size:11px;color:#c8cdec;margin:4px 0 10px}
     [hidden]{display:none!important}small{color:#b8bfd7}
   </style><section aria-label="Teams Local Replies">
-    <header><strong>Local Replies <small>v0.2.12</small></strong><button id="collapse" aria-label="Collapse panel">−</button></header>
+    <header><strong>Local Replies <small>v0.2.13</small></strong><button id="collapse" aria-label="Collapse panel">−</button></header>
     <div id="controls">
       <p id="selected">No chat selected</p><p id="status" role="status">Paused. Open Settings to configure your model and name.</p>
       <div class="row"><button id="settings">Settings</button><button class="primary" id="select">Select this chat</button><button id="diagnose">Check Teams page</button></div>
+      <fieldset id="moods" disabled aria-describedby="mood-status"><legend>Personality &amp; mood</legend><div class="mood-grid" id="mood-choices"></div></fieldset>
+      <p id="mood-status" role="status" aria-live="polite">Choose a mood for new replies. Always polite.</p>
       <label>New incoming messages <select id="mode"><option value="auto">Automatic send</option><option value="draft">Draft</option></select></label>
       <label>Watch <select id="scope"><option value="all">All unread direct chats</option><option value="selected">Selected chat only</option></select></label>
       <div class="row"><button class="primary" id="start">Start</button><button class="pause" id="pause" disabled>Pause</button><button id="generate" disabled>Generate &amp; send</button><button id="preview" disabled>Preview reply</button></div>
@@ -39,6 +47,7 @@
   const status = message => { $("status").textContent = message; };
   let pageReport = "";
   let config, selected = null, running = false, busy = false, epoch = 0, baseline = "", due = 0;
+  let moodSave = null;
   let draftSnapshot = null, pendingDelivery = null, userRevision = 0, selectedMode = "auto";
   let automaticDraft = null, waitingForBottom = false;
   let inserting = false, navigating = false, monitor = Core.monitorSettings();
@@ -49,6 +58,37 @@
   let scanDue = 0, lastUnreadCount = 0;
   const marks = new Map();
   const unanswered = new Map();
+  for (const [id, persona] of Object.entries(Core.PERSONALITIES)) {
+    const label = document.createElement("label"); label.className = "mood-choice";
+    const input = document.createElement("input");
+    input.type = "radio"; input.name = "personality"; input.value = id;
+    const image = document.createElement("img");
+    image.src = chrome.runtime.getURL(persona.image); image.alt = ""; image.width = 28; image.height = 28;
+    const text = document.createElement("span");
+    const name = document.createElement("b"); name.textContent = persona.name;
+    const mood = document.createElement("small"); mood.textContent = persona.mood;
+    text.append(name, mood); label.append(input, image, text); $("mood-choices").append(label);
+    input.addEventListener("change", () => {
+      if (!input.checked || moodSave) return;
+      $("moods").disabled = true;
+      $("mood-status").textContent = `Saving ${persona.name}…`;
+      moodSave = (async () => {
+        const { config: raw } = await chrome.storage.local.get("config");
+        const next = Core.settings({ ...raw, personality: id });
+        await chrome.storage.local.set({ config: next });
+        await loadConfig();
+        $("mood-status").textContent = `${Core.PERSONALITIES[config.personality].name} saved. Applies to new replies.`;
+      })();
+      void moodSave.catch(error => {
+        renderMood();
+        $("mood-status").textContent = `Mood could not be saved: ${error.message}`;
+      }).finally(() => { moodSave = null; $("moods").disabled = !config; });
+    });
+  }
+  function renderMood() {
+    for (const input of $("mood-choices").querySelectorAll("input")) input.checked = input.value === config?.personality;
+    $("moods").disabled = !config || !!moodSave;
+  }
   function withPending(snapshot) {
     const pending = unanswered.get(snapshot.identity);
     if (!pending || snapshot.messages.at(-1)?.role === "other") return snapshot;
@@ -74,6 +114,7 @@
   async function loadConfig() {
     const { config: raw } = await chrome.storage.local.get("config");
     config = Core.settings(raw);
+    renderMood();
   }
   function pause(message = "Paused.", disable = false) {
     running = false; waitingForBottom = false; epoch++; due = 0;
@@ -192,6 +233,9 @@
     }
   }
   async function generate(manual = false, replyMode = selectedMode) {
+    const beforeMoodSave = epoch;
+    await moodSave;
+    if (beforeMoodSave !== epoch) return;
     if (busy) throw new Error("A reply is already being generated.");
     if ($("draft").value.trim()) throw new Error("Insert or dismiss the existing draft before generating another reply.");
     let snapshot = current(manual && !selected?.isGroup);
@@ -299,6 +343,9 @@
   });
   act("inspect", () => inspect(Teams.snapshot(config)));
   async function start(resuming = false) {
+    const beforeMoodSave = epoch;
+    await moodSave;
+    if (beforeMoodSave !== epoch) return;
     if (busy) throw new Error("Wait for the current generation to finish.");
     if (!config.selfName) throw new Error("Set your exact Teams display name in Settings first.");
     selectedMode = resuming ? monitor.mode : $("mode").value;
@@ -394,6 +441,16 @@
       if (!monitor.enabled && running) pause("Monitoring was turned off in another Teams window.");
     }
     if (changes.config) {
+      // A mood switch changes future requests, not the selected chat, drafts,
+      // or a reply already in progress. Other settings still require a reload.
+      try {
+        const next = Core.settings(changes.config.newValue);
+        if (config && Object.keys({ ...config, ...next }).every(key => key === "personality" || JSON.stringify(config[key]) === JSON.stringify(next[key]))) {
+          config = next; renderMood();
+          $("mood-status").textContent = `${Core.PERSONALITIES[config.personality].name} selected for new replies.`;
+          return;
+        }
+      } catch { /* Preserve the existing reload/error handling for invalid settings. */ }
       selected = null; $("generate").disabled = true; $("preview").disabled = true;
       pause("Settings changed. Reloading configuration…"); clearDraft(); $("selected").textContent = "No chat selected";
       resumePending = monitor.enabled;

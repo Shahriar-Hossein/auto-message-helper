@@ -15,6 +15,10 @@ for (const match of html.matchAll(/(?:src|href)="([^"]+)"/g)) assert.ok(fs.exist
 for (const persona of Object.values(require("../extension/core.js").PERSONALITIES)) {
   assert.ok(fs.existsSync(path.join(directory, persona.image)), `Missing personality image: ${persona.image}`);
 }
+assert.deepEqual(manifest.web_accessible_resources, [{
+  resources: Object.values(require("../extension/core.js").PERSONALITIES).map(persona => persona.image),
+  matches: manifest.content_scripts[0].matches
+}], "Only personality images should be exposed, limited to supported Teams hosts");
 assert.deepEqual(manifest.permissions, ["storage"]);
 assert.deepEqual(manifest.host_permissions, ["http://127.0.0.1/*", "http://localhost/*"]);
 console.log("Extension JavaScript syntax, manifest assets, and permission scope passed.");
