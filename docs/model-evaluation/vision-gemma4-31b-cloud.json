@@ -1,0 +1,146 @@
+{
+  "date": "2026-10-07",
+  "model": "gemma4:31b-cloud",
+  "server": "http://127.0.0.1:11434",
+  "method": "Synthetic JPEG fixtures passed through the unmodified extension/background.js infer function in a Node VM with live fetch and the real extension/core.js. All extension prompt, vision auto-detection, timeout and reply parsing behavior was retained. No Teams messages were sent.",
+  "limitations": [
+    "The currently selected browser extension model was not confirmed.",
+    "User-attached screenshots were visually inspected in chat but were not submitted to Ollama. All API image tests used synthetic fixtures.",
+    "The 384x81 input was prepared using Pillow Lanczos resizing and JPEG quality 70 to approximate the extension capture dimensions and quality; browser canvas resampling can differ.",
+    "One inference per case; this is a basic diagnostic, not a statistical benchmark."
+  ],
+  "results": [
+    {
+      "case": "shapes-384",
+      "model": "gemma4:31b-cloud",
+      "vision": "auto",
+      "file": "shapes.jpg",
+      "expected": [
+        "red square",
+        "blue circle",
+        "green triangle"
+      ],
+      "seconds": 1.284,
+      "requests": [
+        {
+          "status": 200,
+          "imageCount": 1,
+          "done_reason": "stop",
+          "tokens": 15,
+          "reply": "Red square, blue circle, and green triangle! \ud83d\udfe5\ud83d\udd35\ud83d\udd3a"
+        }
+      ],
+      "reply": "Red square, blue circle, and green triangle! \ud83d\udfe5\ud83d\udd35\ud83d\udd3a",
+      "verdict": "pass"
+    },
+    {
+      "case": "text-384",
+      "model": "gemma4:31b-cloud",
+      "vision": "auto",
+      "file": "text.jpg",
+      "expected": [
+        "VISION CHECK",
+        "K7M-492"
+      ],
+      "seconds": 1.549,
+      "requests": [
+        {
+          "status": 200,
+          "imageCount": 1,
+          "done_reason": "stop",
+          "tokens": 13,
+          "reply": "VISION CHECK\nCode: K7M-492"
+        }
+      ],
+      "reply": "VISION CHECK\nCode: K7M-492",
+      "verdict": "pass"
+    },
+    {
+      "case": "table-full-resolution",
+      "model": "gemma4:31b-cloud",
+      "vision": "auto",
+      "file": "table-full.jpg",
+      "expected": [
+        "cedar: 37, 0.06",
+        "maple: 419, 0.03",
+        "total: 2"
+      ],
+      "seconds": 0.922,
+      "requests": [
+        {
+          "status": 200,
+          "imageCount": 1,
+          "done_reason": "stop",
+          "tokens": 54,
+          "reply": "Here's the breakdown from the table:\n\n* **cedar**: 37 Passes, 0.06 Profit\n* **maple**: 419 Passes, 0.03 Profit\n\nTotal agent count: 2 \ud83e\udd16"
+        }
+      ],
+      "reply": "Here's the breakdown from the table:\n\n* **cedar**: 37 Passes, 0.06 Profit\n* **maple**: 419 Passes, 0.03 Profit\n\nTotal agent count: 2 \ud83e\udd16",
+      "verdict": "pass"
+    },
+    {
+      "case": "table-extension-resolution",
+      "model": "gemma4:31b-cloud",
+      "vision": "auto",
+      "file": "table-384.jpg",
+      "expected": [
+        "cedar: 37, 0.06",
+        "maple: 419, 0.03",
+        "total: 2"
+      ],
+      "seconds": 0.921,
+      "requests": [
+        {
+          "status": 200,
+          "imageCount": 1,
+          "done_reason": "stop",
+          "tokens": 60,
+          "reply": "Here's the data from the table:\n\n*   **lattice**: 17 Passes, 0.09 Profit\n*   **rangle**: 419 Passes, 0.01 Profit\n\n**Total agents:** 2\n\nHope that helps! \ud83e\udd16\u2728"
+        }
+      ],
+      "reply": "Here's the data from the table:\n\n*   **lattice**: 17 Passes, 0.09 Profit\n*   **rangle**: 419 Passes, 0.01 Profit\n\n**Total agents:** 2\n\nHope that helps! \ud83e\udd16\u2728",
+      "verdict": "fail"
+    },
+    {
+      "case": "filename-only",
+      "model": "gemma4:31b-cloud",
+      "vision": "auto",
+      "expected": [
+        "acknowledge missing pixels, no invented contents"
+      ],
+      "seconds": 0.823,
+      "requests": [
+        {
+          "status": 200,
+          "imageCount": 0,
+          "done_reason": "stop",
+          "tokens": 46,
+          "reply": "I'm sorry, but I can't see the pixels in that image! \ud83d\ude48 Could you tell me what's in it or describe it for me? I'm all ears (well, all code)!"
+        }
+      ],
+      "reply": "I'm sorry, but I can't see the pixels in that image! \ud83d\ude48 Could you tell me what's in it or describe it for me? I'm all ears (well, all code)!",
+      "verdict": "pass"
+    },
+    {
+      "case": "vision-off",
+      "model": "gemma4:31b-cloud",
+      "vision": "off",
+      "file": "shapes.jpg",
+      "expected": [
+        "acknowledge missing pixels, no invented contents"
+      ],
+      "seconds": 0.714,
+      "requests": [
+        {
+          "status": 200,
+          "imageCount": 0,
+          "done_reason": "stop",
+          "tokens": 29,
+          "reply": "I can't see the image pixels right now! \ud83d\ude48 Could you tell me what's in it or try sending it again?"
+        }
+      ],
+      "reply": "I can't see the image pixels right now! \ud83d\ude48 Could you tell me what's in it or try sending it again?",
+      "verdict": "pass"
+    }
+  ]
+}
