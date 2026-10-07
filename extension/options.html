@@ -17,6 +17,12 @@
       <label style="margin-top:16px">This extension's origin<input id="extension-origin" readonly aria-describedby="origin-help"></label>
       <p id="origin-help" class="hint">For Ollama HTTP 403, add this exact origin to the running server's <code>OLLAMA_ORIGINS</code> and restart that server. On Linux with a systemd service, use <code>sudo systemctl edit ollama.service</code> and add <code>Environment="OLLAMA_ORIGINS=YOUR_EXTENSION_ORIGIN"</code> under <code>[Service]</code>.</p>
     </fieldset>
+    <fieldset aria-describedby="personality-help"><legend>Personality &amp; mood</legend>
+      <p id="personality-help" class="personality-intro">Choose your sidekick. Every mood puts good manners first.</p>
+      <div id="personalities" class="personalities"></div>
+      <p class="hint">All four answer questions and help with the conversation. Serious moments always get a gentle, sincere reply.</p>
+      <p class="owner-note">About you: <strong>he / him / his</strong> · English: <strong>my hooman</strong> · Bangla / Banglish: <strong>amr hoooman</strong></p>
+    </fieldset>
     <fieldset><legend>Reply preferences</legend>
       <div class="grid">
         <label>Recent direct-chat messages (5–50)<input name="windowSize" type="number" min="5" max="50" required></label>
@@ -24,8 +30,8 @@
         <label>Wait for consecutive messages (ms)<input name="debounceMs" type="number" min="1000" max="15000" step="500" required></label>
         <label>Image understanding<select name="vision"><option value="auto">Detect automatically (Ollama)</option><option value="on">Enabled — vision model</option><option value="off">Captions only</option></select></label>
       </div>
-      <p class="hint">Chuckles answers questions, drafts messages, summarizes, and suggests fixes using the conversation. Replies match English, Bangla, or Banglish and may include relevant emojis. It skips repeated introductions and mentions you only when relevant. Adjust the humor and add your known facts below.</p>
-      <label>Chuckles' style and your known facts<textarea name="style" rows="4" maxlength="1500" placeholder="Playful and warm. Keep jokes relevant and replies short."></textarea></label>
+      <p class="hint">Your sidekick matches English, Bangla, or Banglish, skips repeated introductions, and mentions you only when relevant. These extra preferences apply to every mood; politeness and your identity always come first.</p>
+      <label>Extra style preferences and your known facts<textarea name="style" rows="4" maxlength="1500" placeholder="Keep replies short. No emojis. Add any facts you want your sidekick to know."></textarea></label>
       <p class="hint">Group chats always use up to 50 recent messages and a 48,000-character context budget. Text prompts are bounded to 32,000 bytes for direct chats and 64,000 bytes for groups. Ollama requests 32,768 context tokens; both providers allow 1,024 output tokens. Images and GIF still frames need a vision model; otherwise the model receives captions. Long messages and preferences may be shortened.</p>
     </fieldset>
     <details><summary>Teams selectors — adjust if your UI differs</summary>

@@ -26,6 +26,19 @@ function harness(fetchImpl) {
   const payload = { type: "generate", token: "a", identity: "chat-a", messages: [{ id: "1", role: "other", text: "Hello" }] };
   return { send, sender, payload, data, requests: () => requests };
 }
+test("saved personality changes reach subsequent model requests without restarting the worker", async () => {
+  const bodies = [];
+  const h = harness(async (url, options) => {
+    bodies.push(JSON.parse(options.body));
+    return { ok: true, json: async () => ({ message: { content: "Happy to help." } }) };
+  });
+  await h.send({ type: "claim", token: "a" });
+  for (const [personality, persona] of Object.entries(Core.PERSONALITIES)) {
+    h.data.config = Core.settings({ ...h.data.config, personality });
+    assert.equal((await h.send({ ...h.payload, manual: true })).ok, true);
+    assert.ok(bodies.at(-1).messages[0].content.startsWith(`You are ${persona.name},`));
+  }
+});
 test("only Teams top frames and extension settings can use the worker", async () => {
   const h = harness();
   for (const sender of [{ ...h.sender, frameId: 1 }, { ...h.sender, url: "https://evil.test" }, { ...h.sender, id: "different" }, { id: h.sender.id, url: "https://teams.microsoft.com" }]) {

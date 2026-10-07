@@ -3,6 +3,22 @@ const form = document.getElementById("settings");
 const status = document.getElementById("status");
 const selectors = document.getElementById("selectors");
 document.getElementById("extension-origin").value = chrome.runtime.getURL("").replace(/\/$/, "");
+for (const [id, persona] of Object.entries(TeamsReplyCore.PERSONALITIES)) {
+  const card = document.createElement("label");
+  card.className = "personality-card";
+  const input = document.createElement("input");
+  input.type = "radio"; input.name = "personality"; input.value = id; input.required = true;
+  const image = document.createElement("img");
+  image.src = persona.image; image.alt = ""; image.width = 52; image.height = 52;
+  const details = document.createElement("span");
+  details.className = "personality-details";
+  const name = document.createElement("strong"); name.textContent = persona.name;
+  const mood = document.createElement("span"); mood.className = "personality-mood"; mood.textContent = persona.mood;
+  const description = document.createElement("span"); description.className = "personality-description"; description.textContent = persona.description;
+  details.append(name, mood, description);
+  card.append(input, image, details);
+  document.getElementById("personalities").append(card);
+}
 function display(config) {
   for (const key of Object.keys(TeamsReplyCore.DEFAULTS)) {
     if (key !== "selectors") form.elements.namedItem(key).value = config[key];

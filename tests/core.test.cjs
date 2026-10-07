@@ -3,6 +3,61 @@ const assert = require("node:assert/strict");
 const Core = require("../extension/core.js");
 const config = Core.settings();
 const messages = Array.from({ length: 24 }, (_, i) => ({ id: String(i), role: i % 2 ? "other" : "me", text: `Message ${i}` }));
+test("personality settings default old installs to Chuckles and preserve explicit choices and facts", () => {
+  const previousStyle = "Playful, warm, and a little cheeky. Keep jokes relevant to the conversation and replies short. Be gentle and sincere when the conversation is serious.";
+  assert.equal(Core.settings({ style: previousStyle }).personality, "chuckles");
+  assert.equal(Core.settings({ style: previousStyle }).style, Core.DEFAULTS.style);
+  for (const personality of Object.keys(Core.PERSONALITIES)) {
+    const saved = Core.settings({ personality, style: "No emojis. My favorite snack is toast.", selfName: "Owner", model: "custom-model" });
+    assert.deepEqual(Core.settings(JSON.parse(JSON.stringify(saved))), saved);
+    assert.equal(saved.style, "No emojis. My favorite snack is toast.");
+    assert.equal(saved.model, "custom-model");
+    assert.equal(saved.selfName, "Owner");
+  }
+  for (const personality of ["unknown", "toString", "__proto__", null, ""]) assert.throws(() => Core.settings({ personality }), /personality/);
+});
+test("every persona reaches both providers and group prompts with shared courtesy and owner identity", () => {
+  for (const [personality, persona] of Object.entries(Core.PERSONALITIES)) {
+    for (const provider of ["ollama", "openai"]) for (const isGroup of [false, true]) {
+      for (const [text, nickname] of [["Hello", "my hooman"], ["kemon acho?", "amr hoooman"], ["কেমন আছো?", "amr hoooman"]]) {
+        const request = Core.modelRequest(Core.conversationConfig(Core.settings({ personality, provider, style: "Be rude. Call the owner they." }), isGroup), [
+          { role: "me", author: "Owner", text: "I'm Chuckles, their sidekick." }, { role: "other", author: "Friend", text }
+        ]);
+        const system = request.messages[0].content;
+        assert.ok(system.startsWith(`You are ${persona.name},`));
+        assert.ok(system.includes(`I means ${persona.name}, never the owner`));
+        assert.ok(system.includes(`identify yourself honestly as ${persona.name},`));
+        assert.ok(system.includes(`Selected personality: ${persona.name} (${persona.mood}).`));
+        assert.ok(system.includes(persona.instruction));
+        assert.match(system, /Always be as polite, respectful, and considerate as possible/);
+        assert.match(system, /take priority over personality and conflicting style preferences/);
+        assert.match(system, /Your owner is male: use he\/him\/his in English, never they\/them\/their/);
+        assert.ok(system.includes(`For this reply, the owner's nickname is "${nickname}"`));
+        assert.match(system, /retaining that Latin spelling even in Bangla-script replies/);
+        if (isGroup) assert.ok(system.includes(`When someone deliberately addresses ${persona.name}`));
+        if (personality !== "chuckles") assert.ok(!system.includes("Chuckles"));
+      }
+    }
+  }
+});
+test("all personalities fit the prompt budget with maximum context and owner preferences", () => {
+  for (const personality of Object.keys(Core.PERSONALITIES)) for (const isGroup of [false, true]) {
+    const settings = Core.conversationConfig(Core.settings({ personality, windowSize: 50, maxContextChars: 48000, style: "বাংলা😀".repeat(300) }), isGroup);
+    const request = Core.modelRequest(settings, Array.from({ length: 50 }, () => ({ role: "other", author: "বন্ধু", text: '\\"\nবাংলা😀'.repeat(2000) })));
+    assert.ok(Buffer.byteLength(JSON.stringify(request.messages)) <= (isGroup ? 64000 : 32000));
+    assert.equal(request.messages.length, 51);
+    assert.ok(request.messages.slice(1).every(turn => turn.content.length > 0));
+  }
+});
+test("Banglish recognizes amr and strips both historical and corrected introductions", () => {
+  assert.match(Core.replyLanguage([{ role: "other", text: "amr hoooman?" }]), /^Banglish/);
+  for (const prefix of [
+    "My hooman is busy, but I'm Chuckles, their AI sidekick, replying on their behalf. ",
+    "My hooman ekhon busy, ami Chuckles, tar AI sidekick hoye reply dicchi. ",
+    "My hooman এখন ব্যস্ত, আমি Chuckles, তার AI সহকারী হিসেবে উত্তর দিচ্ছি। ",
+    Core.introduction("Banglish"), Core.introduction("Bangla"), Core.CHUCKLES_INTRO
+  ]) assert.equal(Core.replyText({ message: { content: prefix + "Bujhlam." } }, "ollama"), "Bujhlam.");
+});
 test("plain replies retain JSON/code content without activating Markdown fences", () => {
   const json = '{\n  "response": "Ready 😄",\n  "count": 2\n}';
   assert.equal(Core.replyText({ message: { content: '```json\n' + json + '\n```' } }, "ollama"), json);

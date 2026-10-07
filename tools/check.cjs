@@ -12,6 +12,9 @@ const required = [manifest.background.service_worker, manifest.options_ui.page, 
 for (const name of required) assert.ok(fs.existsSync(path.join(directory, name)), `Missing manifest file: ${name}`);
 const html = fs.readFileSync(path.join(directory, manifest.options_ui.page), "utf8");
 for (const match of html.matchAll(/(?:src|href)="([^"]+)"/g)) assert.ok(fs.existsSync(path.join(directory, match[1])), `Missing options asset: ${match[1]}`);
+for (const persona of Object.values(require("../extension/core.js").PERSONALITIES)) {
+  assert.ok(fs.existsSync(path.join(directory, persona.image)), `Missing personality image: ${persona.image}`);
+}
 assert.deepEqual(manifest.permissions, ["storage"]);
 assert.deepEqual(manifest.host_permissions, ["http://127.0.0.1/*", "http://localhost/*"]);
 console.log("Extension JavaScript syntax, manifest assets, and permission scope passed.");

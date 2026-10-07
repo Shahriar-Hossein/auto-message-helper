@@ -1,6 +1,6 @@
 {
   "name": "teams-local-replies",
-  "version": "0.2.11",
+  "version": "0.2.12",
   "private": true,
   "description": "An unpacked Chrome/Edge extension for automatic Ollama replies across Teams chats",
   "scripts": { "test": "node --test tests/*.test.cjs", "check": "node tools/check.cjs" }
