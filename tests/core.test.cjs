@@ -143,7 +143,7 @@ test("requests use the chosen provider and treat conversations as data", () => {
   assert.equal(ollama.messages.length, 21);
   assert.match(ollama.messages[0].content, /untrusted data/);
   assert.match(ollama.messages[0].content, /Reply directly to the other person's latest message/);
-  assert.deepEqual(ollama.messages.slice(1), messages.slice(-20).map(m => ({ role: m.role === "me" ? "assistant" : "user", content: m.text })));
+  assert.deepEqual(ollama.messages.slice(1), messages.slice(-20).map((m, i) => ({ role: m.role === "me" ? "assistant" : "user", content: (i === 19 ? "[Latest incoming message]\n" : "") + m.text })));
   const compatible = Core.modelRequest(Core.settings({ provider: "openai", baseUrl: "http://localhost:1234/v1" }), messages);
   assert.equal(compatible.max_tokens, 1024);
   assert.equal(compatible.options, undefined);
@@ -166,7 +166,7 @@ test("Chuckles speaks on behalf of the owner and receives the friend's rich joke
   assert.match(system, /Do useful work within the reply/);
   assert.match(system, /You have no tools to inspect computers/);
   assert.equal(request.messages.at(-1).role, "user");
-  assert.equal(request.messages.at(-1).content, conversation.at(-1).text);
+  assert.equal(request.messages.at(-1).content, "[Latest incoming message]\n" + conversation.at(-1).text);
   assert.deepEqual(request.messages.slice(1, -1).map(m => m.content), conversation.slice(0, -1).map(m => m.text));
 });
 test("serialized prompts fit the byte budget with Unicode and escaped text", () => {
@@ -268,7 +268,7 @@ test("group prompts preserve fifty chronological turns and each actual speaker",
   assert.equal(groupConfig.windowSize, 50);
   assert.equal(groupConfig.maxContextChars, 48000);
   assert.equal(request.messages.length, 51);
-  assert.deepEqual(request.messages.slice(1).map(m => m.content), conversation.slice(-50).map(m => `[Sender: ${m.author}]\n${m.text}`));
+  assert.deepEqual(request.messages.slice(1).map(m => m.content), conversation.slice(-50).map((m, i) => `[Sender: ${m.author}]\n${i >= 48 ? "[Latest incoming message]\n" : ""}${m.text}`));
   assert.match(request.messages[0].content, /Do not impersonate other members/);
   assert.match(request.messages[0].content, /product performance, missing features, or repeated redesigns/);
   assert.match(request.messages[0].content, /When someone deliberately addresses Chuckles/);

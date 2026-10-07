@@ -281,13 +281,22 @@
     const image = document.createElement("img"); image.alt = "dancing cat GIF"; image.width = 64; image.height = 64;
     const imageReady = new Promise(resolve => { image.onload = resolve; });
     image.src = canvas.toDataURL("image/png"); mediaRow.append(image); await imageReady; list.scrollTop = list.scrollHeight;
+    const mediaSnapshot = TeamsReplyAdapter.snapshot(testState.config);
+    const captured = await TeamsReplyAdapter.captureMedia(mediaSnapshot, testState.config);
     check("media-only incoming GIFs count among the latest twenty messages", () => {
-      const snapshot = TeamsReplyAdapter.snapshot(testState.config);
-      assert(snapshot.messages.length === 20 && snapshot.messages[0].id === "history-5", "Wrong recent context window");
-      assert(snapshot.messages.at(-1).text === "" && snapshot.messages.at(-1).media[0].kind === "GIF", "Media-only message was skipped or turned into text");
-      const captured = TeamsReplyAdapter.captureMedia(snapshot, testState.config);
+      assert(mediaSnapshot.messages.length === 20 && mediaSnapshot.messages[0].id === "history-5", "Wrong recent context window");
+      assert(mediaSnapshot.messages.at(-1).text === "" && mediaSnapshot.messages.at(-1).media[0].kind === "GIF", "Media-only message was skipped or turned into text");
       assert(captured.at(-1).media[0].data.startsWith("data:image/jpeg;base64,"), "Image pixels were not captured");
     });
+    const emojiRow = incoming("emoji-only", "");
+    const emoji = document.createElement("img"); emoji.alt = "Smile"; emoji.setAttribute("itemtype", "http://schema.skype.com/Emoji");
+    emoji.width = 20; emoji.height = 20; emoji.src = canvas.toDataURL("image/png"); emojiRow.querySelector("p").append(emoji);
+    await new Promise(resolve => setTimeout(resolve, 50));
+    check("emoji-only incoming replies stay the latest message", () => {
+      const latest = TeamsReplyAdapter.snapshot(testState.config).messages.at(-1);
+      assert(latest.id === "emoji-only" && latest.role === "other" && latest.text === "Smile" && !latest.media, "Emoji-only reply was dropped or sent as an image");
+    });
+    emojiRow.remove(); list.scrollTop = list.scrollHeight;
     await click("select"); $("mode").value = "draft";
     const manualBefore = testState.sendCount;
     // Use the actual fixture button, whose icon carries the Send selector.

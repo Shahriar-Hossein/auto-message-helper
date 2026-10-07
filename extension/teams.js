@@ -63,46 +63,102 @@
     }
     // innerText on detached clones is unreliable. Preserve paragraph boundaries.
     for (const node of clone.querySelectorAll("img")) {
-      const alt = node.getAttribute("alt") || "";
-      node.replaceWith(/\p{Extended_Pictographic}/u.test(alt) || node.closest('[data-tid*="emoji"]') ? alt : "");
+      node.replaceWith(isEmoji(node) ? emojiName(node) : "");
     }
     for (const node of clone.querySelectorAll("br")) node.replaceWith("\n");
     for (const node of clone.querySelectorAll("p, div, blockquote, li")) node.append("\n");
     return clone.textContent.replace(/[\t ]+/g, " ").replace(/ *\n */g, "\n").replace(/\n{3,}/g, "\n\n").trim();
   }
+  const NOT_MEDIA = 'button, [role="toolbar"], [data-tid*="reaction"], [data-tid*="avatar"], [data-tid*="author"]';
+  // Teams emoji images often carry a name ("Smile") instead of the character.
+  const isEmoji = node => /\p{Extended_Pictographic}/u.test(node.getAttribute("alt") || "") ||
+    !!node.closest('[data-tid*="emoji"], [class*="emoji" i], [itemtype*="Emoji" i]');
+  const emojiName = node => node.getAttribute("alt") || node.getAttribute("title") || node.getAttribute("aria-label") || "";
+  const rowId = row => row.getAttribute("data-message-id") || row.getAttribute("data-mid") || row.id;
+  function emojiText(row) {
+    return Core.normalize(all("img", row).filter(node => !node.closest(NOT_MEDIA) && isEmoji(node)).map(emojiName).join(" "));
+  }
+  function mediaNodes(row) {
+    return all("img, video, svg", row).filter(node => {
+      if (node.closest(NOT_MEDIA) || node.parentElement?.closest("svg")) return false;
+      // Inline SVG is mostly UI icons; only sticker-sized drawings carry content.
+      if (node.tagName.toLowerCase() === "svg") { const box = node.getBoundingClientRect(); return box.width >= 48 && box.height >= 48; }
+      return !isEmoji(node);
+    });
+  }
+  const mediaKey = (node, index) => node.tagName.toLowerCase() === "svg" ? `svg:${index}` : node.currentSrc || node.poster || node.src || "";
   function messageMedia(row) {
-    const media = [];
-    const excluded = 'button, [role="toolbar"], [data-tid*="reaction"], [data-tid*="avatar"], [data-tid*="author"], [data-tid*="emoji"]';
-    for (const img of all("img, video", row)) {
-      if (img.closest(excluded) || /\p{Extended_Pictographic}/u.test(img.alt || "") && img.naturalWidth <= 48) continue;
-      const src = img.currentSrc || img.poster || img.src || "";
-      const kind = img.tagName === "VIDEO" || /gif|giphy|tenor/i.test(src + " " + (img.alt || "") + " " + (img.getAttribute("data-tid") || "")) ? "GIF" : "image";
-      media.push({ kind, label: Core.normalize(img.alt || img.title || "No caption").slice(0, 500), key: src });
-    }
+    const media = mediaNodes(row).map((node, index) => {
+      const svg = node.tagName.toLowerCase() === "svg";
+      const label = node.getAttribute("alt") || node.getAttribute("title") || node.getAttribute("aria-label") || (svg && node.querySelector("title")?.textContent) || "No caption";
+      const key = mediaKey(node, index);
+      const kind = node.tagName === "VIDEO" || /gif|giphy|tenor/i.test(key + " " + label + " " + (node.getAttribute("data-tid") || "")) ? "GIF" : "image";
+      return { kind, label: Core.normalize(label).slice(0, 500), key };
+    });
     for (const node of all('[data-tid="attachment-card"], [data-tid="file-preview"], [data-tid="attachment"]', row)) {
       if (!node.querySelector("img")) media.push({ kind: "attachment", label: Core.normalize(text(node)).slice(0, 300), key: node.getAttribute("data-attachment-id") || text(node) });
     }
     return media.slice(0, 4);
   }
-  function captureMedia(snapshot, config) {
+  function toJpeg(source, width, height) {
+    const canvas = document.createElement("canvas");
+    const scale = Math.min(1, 384 / Math.max(width, height));
+    canvas.width = Math.max(1, Math.round(width * scale)); canvas.height = Math.max(1, Math.round(height * scale));
+    const ctx = canvas.getContext("2d"); ctx.fillStyle = "white"; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/jpeg", 0.7); // Throws on a cross-origin (tainted) canvas.
+  }
+  function loadMedia(tag, src, cors) {
+    const node = document.createElement(tag);
+    if (cors) node.crossOrigin = "anonymous";
+    if (tag === "video") { node.muted = true; node.preload = "auto"; }
+    return new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error("Timed out")), 3000);
+      node.addEventListener(tag === "video" ? "loadeddata" : "load", () => { clearTimeout(timer); resolve(node); }, { once: true });
+      node.addEventListener("error", () => { clearTimeout(timer); reject(new Error("Load failed")); }, { once: true });
+      node.src = src;
+    });
+  }
+  const size = node => [node.naturalWidth || node.videoWidth || node.clientWidth, node.naturalHeight || node.videoHeight || node.clientHeight];
+  const corsPixels = new Map();
+  async function pixels(node) {
+    const tag = node.tagName.toLowerCase();
+    if (tag === "svg") {
+      const box = node.getBoundingClientRect(), copy = node.cloneNode(true);
+      copy.setAttribute("xmlns", "http://www.w3.org/2000/svg"); copy.setAttribute("width", box.width); copy.setAttribute("height", box.height);
+      const url = URL.createObjectURL(new Blob([new XMLSerializer().serializeToString(copy)], { type: "image/svg+xml" }));
+      try { return toJpeg(await loadMedia("img", url, false), box.width, box.height); } finally { URL.revokeObjectURL(url); }
+    }
+    const [width, height] = size(node);
+    if (!width || !height || tag === "img" && !node.complete || tag === "video" && node.readyState < 2) return "";
+    try { return toJpeg(node, width, height); } catch { /* Cross-origin GIF hosts taint the canvas. */ }
+    const src = node.currentSrc || node.src || "";
+    if (!/^https:/i.test(src)) return "";
+    // Reload the already-shown URL without cookies; GIF CDNs allow CORS reads.
+    if (!corsPixels.has(src)) {
+      if (corsPixels.size > 200) corsPixels.delete(corsPixels.keys().next().value);
+      corsPixels.set(src, loadMedia(tag, src, true).then(copy => toJpeg(copy, ...size(copy))).catch(() => ""));
+    }
+    return corsPixels.get(src);
+  }
+  async function captureMedia(snapshot, config) {
     let count = 0, bytes = 0;
-    const images = all(config.selectors.row).flatMap(row => all("img, video", row));
-    return snapshot.messages.slice().reverse().map(message => ({ ...message, media: (message.media || []).map(item => {
-      const clean = { kind: item.kind, label: item.label };
-      if (config.vision === "off" || count >= 20) return clean;
-      const img = images.find(node => (node.currentSrc || node.poster || node.src || "") === item.key);
-      const width = img?.naturalWidth || img?.videoWidth, height = img?.naturalHeight || img?.videoHeight;
-      if (!width || !height || img.tagName === "IMG" && !img.complete || img.tagName === "VIDEO" && img.readyState < 2) return clean;
-      try {
-        const canvas = document.createElement("canvas");
-        const scale = Math.min(1, 384 / Math.max(width, height));
-        canvas.width = Math.max(1, Math.round(width * scale)); canvas.height = Math.max(1, Math.round(height * scale));
-        const ctx = canvas.getContext("2d"); ctx.fillStyle = "white"; ctx.fillRect(0, 0, canvas.width, canvas.height); ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        const data = canvas.toDataURL("image/jpeg", 0.7);
-        if (data.length <= 200000 && bytes + data.length <= 2000000) { clean.data = data; count++; bytes += data.length; }
-      } catch { /* Cross-origin previews retain their captions; no remote fetch. */ }
-      return clean;
-    }) })).reverse();
+    const nodes = new Map(all(config.selectors.row).map(row => [rowId(row), mediaNodes(row)]));
+    const captured = [];
+    for (const message of snapshot.messages.slice().reverse()) {
+      const media = [];
+      for (const item of message.media || []) {
+        const clean = { kind: item.kind, label: item.label };
+        media.push(clean);
+        // File cards such as PDFs stay as labels; only pictures are sent.
+        if (config.vision === "off" || count >= 20 || item.kind === "attachment" || /\.pdf\b|application\/pdf/i.test(item.key || "")) continue;
+        const node = nodes.get(message.id)?.find((candidate, index) => mediaKey(candidate, index) === item.key);
+        let data = "";
+        try { data = node ? await pixels(node) : ""; } catch { /* Keep the caption only. */ }
+        if (data && data.length <= 200000 && bytes + data.length <= 2000000) { clean.data = data; count++; bytes += data.length; }
+      }
+      captured.push({ ...message, media });
+    }
+    return captured.reverse();
   }
   function messageAuthor(row, config) {
     let names = all(config.selectors.author, row);
@@ -149,19 +205,20 @@
     if (header.closest('[data-chat-type="channel"], [data-conversation-type="channel"]') || /@thread\.tacv2/i.test(location.href)) {
       throw unsupportedChat("Teams channels are not supported. Open a direct or group chat.");
     }
-    const rows = all(config.selectors.row);
+    // Virtualized lists can recycle rows out of DOM order; read them top to bottom as shown.
+    const rows = all(config.selectors.row).sort((a, b) => a.getBoundingClientRect().top - b.getBoundingClientRect().top);
     if (!rows.length) throw new Error("No text messages found. Open a chat or update the selectors.");
     const messages = [];
     const authors = new Set();
     const seen = new Set();
     let lastTextRow;
     for (const row of rows) {
-      const body = messageBody(row, config);
+      const body = messageBody(row, config) || emojiText(row);
       const media = messageMedia(row);
       if (!body && !media.length) continue;
       const author = messageAuthor(row, config);
       if (author) authors.add(author);
-      const id = row.getAttribute("data-message-id") || row.getAttribute("data-mid") || row.id;
+      const id = rowId(row);
       if (!id) throw new Error("A message has no stable ID. Narrow the row selector to the message container.");
       if (seen.has(id)) throw new Error("Duplicate message IDs detected. Narrow the row selector.");
       seen.add(id);
@@ -209,7 +266,7 @@
     const rows = all(config.selectors.row);
     const scroller = scrollerFor(rows.at(-1), config);
     if (scroller && !initial.atBottom) initial = await latestViewport(config, scroller, initial.identity, valid);
-    const collected = captureMedia(initial, config);
+    const collected = await captureMedia(initial, config);
     const mergeOlder = older => {
       const ids = new Set(collected.map(m => m.id));
       collected.unshift(...older.filter(m => !ids.has(m.id)));
@@ -223,7 +280,7 @@
         await delay(250);
         const older = snapshot(config, config.windowSize);
         if (older.identity !== initial.identity) throw new Error("The conversation changed while loading history.");
-        mergeOlder(captureMedia(older, config));
+        mergeOlder(await captureMedia(older, config));
         if (collected.length === previous && step >= 2) break;
       }
     } finally {
@@ -235,7 +292,7 @@
     if (!valid()) throw new Error("History loading was cancelled.");
     const latest = snapshot(config);
     if (latest.identity !== initial.identity) throw new Error("The conversation changed while loading history.");
-    const fresh = captureMedia(latest, config);
+    const fresh = await captureMedia(latest, config);
     const ids = new Set(fresh.map(m => m.id));
     let imageCount = 0, imageBytes = 0;
     const context = [...collected.filter(m => !ids.has(m.id)), ...fresh].slice(-config.windowSize);

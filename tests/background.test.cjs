@@ -131,8 +131,8 @@ test("the worker sends actual recent messages as the model conversation", async 
   const result = await h.send({ ...h.payload, messages });
   assert.equal(result.ok, true);
   assert.equal(result.reply, "Chuckles here. Yes, send me the report.");
-  assert.deepEqual(body.messages.slice(1), messages.map(m => ({ role: m.role === "me" ? "assistant" : "user", content: m.text })));
-  assert.equal(body.messages.at(-1).content, messages.at(-1).text);
+  assert.deepEqual(body.messages.slice(1), messages.map((m, i) => ({ role: m.role === "me" ? "assistant" : "user", content: (i === 2 ? "[Latest incoming message]\n" : "") + m.text })));
+  assert.equal(body.messages.at(-1).content, "[Latest incoming message]\n" + messages.at(-1).text);
 });
 test("the worker accepts twenty messages and rejects larger or malformed media contexts", async () => {
   const h = harness(); await h.send({ type: "claim", token: "a" });
