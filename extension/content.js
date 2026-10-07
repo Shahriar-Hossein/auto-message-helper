@@ -20,7 +20,7 @@
     details{margin-top:10px}pre{white-space:pre-wrap;max-height:180px;overflow:auto;background:#151827;padding:8px;border-radius:7px}
     [hidden]{display:none!important}small{color:#b8bfd7}
   </style><section aria-label="Teams Local Replies">
-    <header><strong>Local Replies <small>v0.2.7</small></strong><button id="collapse" aria-label="Collapse panel">−</button></header>
+    <header><strong>Local Replies <small>v0.2.8</small></strong><button id="collapse" aria-label="Collapse panel">−</button></header>
     <div id="controls">
       <p id="selected">No chat selected</p><p id="status" role="status">Paused. Open Settings to configure your model and name.</p>
       <div class="row"><button id="settings">Settings</button><button class="primary" id="select">Select this chat</button><button id="diagnose">Check Teams page</button></div>
@@ -79,16 +79,16 @@
     try { return await Teams.insert(config, reply); }
     finally { inserting = false; }
   }
-  function current() {
+  function current(requireBottom = true) {
     if (!selected) throw new Error("Open a direct or group chat and click Select this chat first.");
-    const result = Teams.snapshot(config);
+    const result = Teams.snapshot(Core.conversationConfig(config, selected.isGroup));
     if (result.identity !== selected.identity || result.title !== selected.title) throw new Error("The selected conversation changed. Select it again before starting.");
-    if (!result.atBottom) throw new Error(result.hasScroller ? "Scroll to the bottom of the chat before continuing." : "Cannot identify the message scroller. Update its selector in Settings.");
+    if (requireBottom && !result.atBottom) throw new Error(result.hasScroller ? "Scroll to the bottom of the chat before continuing." : "Cannot identify the message scroller. Update its selector in Settings.");
     return result;
   }
   function inspect(snapshot) {
     $("copy-report").hidden = true;
-    $("context").textContent = `${snapshot.title}\nConversation key: ${snapshot.chatId || "not available (automatic sending disabled)"}\n\n` +
+    $("context").textContent = `${snapshot.title}\nConversation key: ${snapshot.chatId || (snapshot.isGroup ? "not exposed by Teams (group drafts and explicit sending available)" : "not available (automatic sending disabled)")}\n\n` +
       snapshot.messages.map(m => `${m.role === "me" ? "Me" : m.author}: ${m.text}${(m.media || []).map(item => ` [${item.kind}: ${item.label}]`).join("")}`).join("\n\n");
   }
   function showPageCheck(error) {
@@ -100,8 +100,26 @@
     $("draft").value = reply; draftSnapshot = snapshot;
     $("insert").disabled = false; $("send").disabled = false;
   }
+  function reviewedDraft(snapshot, latest) {
+    if (!snapshot) throw new Error("Generate a draft first.");
+    if (!snapshot.isGroup) {
+      if (!Core.isFresh(snapshot, latest)) throw new Error("This draft is stale. Dismiss it and generate a new one.");
+      return;
+    }
+    const state = Core.groupDraftState(snapshot, latest);
+    if (state === "conversation") throw new Error("This draft belongs to a different conversation. Select this group again.");
+    if (state === "unavailable") throw new Error("The draft's original message is no longer loaded. Scroll to the latest messages or generate a new draft.");
+    if (state === "edited") throw new Error("This draft is stale because its original message or sender changed. Dismiss it and generate a new one.");
+  }
   async function deliver(snapshot, reply, version, revision, manual) {
-    const fresh = () => version === epoch && (manual || running) && revision === userRevision && Core.isFresh(snapshot, current());
+    const fresh = () => {
+      if (version !== epoch || !manual && !running || revision !== userRevision) return false;
+      if (manual && snapshot.isGroup) {
+        const state = Core.groupDraftState(snapshot, current(false));
+        return state === "ready" || state === "updated";
+      }
+      return Core.isFresh(snapshot, current());
+    };
     try {
       if (!fresh()) throw new Error("The conversation changed before insertion. Generate a new reply.");
       status("Inserting reply into Teams…");
@@ -116,17 +134,17 @@
       status("Send clicked. Waiting for the outgoing message…");
     } catch (error) {
       if (version === epoch) { keepDraft(snapshot, reply); showPageCheck(error); }
-      throw new Error(`Automatic send stopped: ${error.message}`);
+      throw new Error(`${manual ? "Send" : "Automatic send"} stopped: ${error.message}`);
     }
   }
   async function generate(manual = false, replyMode = selectedMode) {
     if (busy) throw new Error("A reply is already being generated.");
     if ($("draft").value.trim()) throw new Error("Insert or dismiss the existing draft before generating another reply.");
-    let snapshot = current();
+    let snapshot = current(!(manual && selected?.isGroup));
     // Group monitoring prepares reviewable drafts; explicit send actions still send.
     if (snapshot.isGroup && !manual) replyMode = "draft";
-    if (replyMode === "auto" && !snapshot.chatId) throw new Error("Automatic sending requires a stable conversation identity.");
-    if (snapshot.messages.at(-1).role !== "other") throw new Error("The latest message is yours. Waiting for the other person.");
+    if (replyMode === "auto" && !snapshot.chatId && !(manual && snapshot.isGroup)) throw new Error("Automatic sending requires a stable conversation identity.");
+    if (snapshot.messages.at(-1).role !== "other" && !(manual && snapshot.isGroup)) throw new Error("The latest message is yours. Waiting for the other person.");
     if (!Teams.composerEmpty(config)) throw new Error("Your composer contains a draft or attachment. It was preserved.");
     const version = epoch, revision = userRevision;
     busy = true;
@@ -136,11 +154,12 @@
     try {
       await request({ type: "claim" });
       if (version !== epoch) return;
-      const history = await Teams.recentHistory(config, () => version === epoch && revision === userRevision);
-      snapshot = current();
+      const history = await Teams.recentHistory(Core.conversationConfig(config, snapshot.isGroup), () => version === epoch && revision === userRevision);
+      snapshot = current(!snapshot.isGroup);
+      if (snapshot.messages.at(-1).role !== "other") throw new Error("The latest message is yours. Waiting for the other person.");
       const lastContext = history.at(-1), lastLoaded = snapshot.messages.at(-1);
       if (lastContext?.id !== lastLoaded?.id || lastContext?.text !== lastLoaded?.text ||
-          !Core.isFresh(snapshot, current()) || revision !== userRevision || !Teams.composerEmpty(config)) {
+          (!snapshot.isGroup && !Core.isFresh(snapshot, current())) || revision !== userRevision || !Teams.composerEmpty(config)) {
         status("Conversation changed before generation. Try again when it settles."); return;
       }
       inspect({ ...snapshot, messages: history });
@@ -149,7 +168,27 @@
         isGroup: snapshot.isGroup,
         messages: history.map(({ id, text, role, author, media }) => ({ id, text: text.slice(0, Core.conversationConfig(config, snapshot.isGroup).maxContextChars), role, author, ...(media?.length ? { media } : {}) })), manual });
       if (version !== epoch) return;
-      const latest = current();
+      const latest = current(!snapshot.isGroup);
+      if (snapshot.isGroup) {
+        const state = Core.groupDraftState(snapshot, latest);
+        // Preserve a useful group reply in the panel when the discussion, lazy
+        // media, virtualized history, scroll position, or composer changes.
+        if (replyMode === "auto" && manual && state === "ready" && revision === userRevision && Teams.composerEmpty(config)) {
+          await deliver(snapshot, reply, version, revision, manual);
+        } else {
+          keepDraft(snapshot, reply);
+          if (state === "conversation") {
+            status("Group reply kept as a draft. Select the original group before sending.");
+          } else if (state === "edited" || state === "unavailable") {
+            status("Group reply kept as a draft. Its original message changed or is no longer loaded; review it and regenerate before sending.");
+          } else if (revision !== userRevision || !Teams.composerEmpty(config)) {
+            status("Group draft ready. Your Teams composer changed and was preserved; clear or send its text before inserting this draft.");
+          } else if (state === "updated") {
+            status("Group draft ready. New messages or loaded context changed; review the draft against the conversation before Send reply.");
+          } else status("Group draft ready. Use Send reply to send it, or Insert draft to edit it in Teams.");
+        }
+        return;
+      }
       if (!Core.isFresh(snapshot, latest) || revision !== userRevision || !Teams.composerEmpty(config)) {
         status("Discarded the reply because the conversation or composer changed."); return;
       }
@@ -241,8 +280,8 @@
     if (busy) throw new Error("Wait for the current reply operation to finish.");
     if (pendingDelivery) throw new Error("Check the previous delivery before sending another reply.");
     const snapshot = draftSnapshot, reply = $("draft").value.trim();
-    if (!snapshot || !Core.isFresh(snapshot, current())) throw new Error("This draft is stale. Dismiss it and generate a new one.");
-    if (!snapshot.chatId) throw new Error("Automatic sending requires a stable conversation identity.");
+    reviewedDraft(snapshot, current(!snapshot?.isGroup));
+    if (!snapshot.chatId && !snapshot.isGroup) throw new Error("Automatic sending requires a stable conversation identity.");
     if (!reply) throw new Error("The draft is empty.");
     const version = epoch, revision = userRevision;
     busy = true;
@@ -256,7 +295,7 @@
     }
   });
   act("insert", async () => {
-    if (!draftSnapshot || !Core.isFresh(draftSnapshot, current())) throw new Error("This draft is stale. Dismiss it and generate a new one.");
+    reviewedDraft(draftSnapshot, current(!draftSnapshot?.isGroup));
     const snapshot = draftSnapshot, reply = $("draft").value.trim(), version = epoch;
     $("insert").disabled = true;
     try {
@@ -274,10 +313,12 @@
     $("collapse").textContent = $("controls").hidden ? "+" : "−";
     $("collapse").setAttribute("aria-label", $("controls").hidden ? "Expand panel" : "Collapse panel");
   });
-  // Trusted typing/focus activity cancels an in-flight automatic reply, even if text is later cleared.
-  document.addEventListener("input", event => { if (event.isTrusted && !inserting) userRevision++; }, true);
+  // Only actual Teams-composer activity cancels sending. Search boxes and panel
+  // controls can receive trusted input without changing the outgoing message.
+  const inComposer = event => event.composedPath().some(node => node instanceof Element && node.matches(config?.selectors.composer || Core.DEFAULT_SELECTORS.composer));
+  document.addEventListener("input", event => { if (event.isTrusted && !inserting && inComposer(event)) userRevision++; }, true);
   document.addEventListener("keydown", event => {
-    if (event.isTrusted && event.target?.isContentEditable) userRevision++;
+    if (event.isTrusted && inComposer(event)) userRevision++;
   }, true);
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return;
@@ -387,7 +428,7 @@
           await navigateUnread(); return;
         }
         if (selectedMode === "auto" && !snapshot.chatId) { status("Waiting for a direct chat with a stable conversation identity."); await navigateUnread(); return; }
-      } else snapshot = current();
+      } else snapshot = current(!pendingDelivery?.snapshot.isGroup);
       if (pendingDelivery) {
         const delivered = snapshot.messages.some(m => m.role === "me" &&
           !pendingDelivery.snapshot.messages.some(old => old.id === m.id) && Core.normalize(m.text) === Core.normalize(pendingDelivery.reply));

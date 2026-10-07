@@ -154,7 +154,7 @@
     }
     if (!messages.length) throw new Error("No readable text messages found.");
     const otherNames = [...authors].filter(name => name !== config.selfName);
-    const isGroup = participants(header).length > 1 || otherNames.length > 1 ||
+    const isGroup = config.isGroup === true || participants(header).length > 1 || otherNames.length > 1 ||
       !!header.closest('[data-chat-type="group"], [data-conversation-type="group"]') ||
       otherNames.length === 1 && otherNames[0] !== title;
     const chatConfig = Core.conversationConfig(config, isGroup);
@@ -169,16 +169,36 @@
     };
   }
   const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+  async function latestViewport(config, scroller, identity, valid) {
+    let previous = "", settled = 0, latest;
+    for (let step = 0; step < 8 && valid(); step++) {
+      scroller.scrollTop = scroller.scrollHeight;
+      scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
+      await delay(150);
+      if (!valid()) throw new Error("History loading was cancelled.");
+      latest = snapshot(config);
+      if (latest.identity !== identity) throw new Error("The conversation changed while loading history.");
+      const last = latest.messages.at(-1);
+      const mark = JSON.stringify([last.id, last.role, last.author, last.text]);
+      settled = latest.atBottom && mark === previous ? settled + 1 : 0;
+      previous = mark;
+      if (settled >= 1) return latest;
+    }
+    if (!valid()) throw new Error("History loading was cancelled.");
+    if (latest?.atBottom) return latest;
+    throw new Error("Teams is still loading the latest messages. Try again when it finishes.");
+  }
   async function recentHistory(config, valid = () => true) {
-    const initial = snapshot(config);
+    let initial = snapshot(config);
     config = Core.conversationConfig(config, initial.isGroup);
+    const rows = all(config.selectors.row);
+    const scroller = scrollerFor(rows.at(-1), config);
+    if (scroller && !initial.atBottom) initial = await latestViewport(config, scroller, initial.identity, valid);
     const collected = captureMedia(initial, config);
     const mergeOlder = older => {
       const ids = new Set(collected.map(m => m.id));
       collected.unshift(...older.filter(m => !ids.has(m.id)));
     };
-    const rows = all(config.selectors.row);
-    const scroller = scrollerFor(rows.at(-1), config);
     // Fetch virtualized history in bounded steps, then return to the latest turn.
     try {
       for (let step = 0; collected.length < config.windowSize && step < 8 && scroller; step++) {
@@ -194,8 +214,7 @@
     } finally {
       // Never scroll a different conversation after navigation or user intervention.
       if (valid() && scroller?.isConnected && snapshot(config).identity === initial.identity) {
-        scroller.scrollTop = scroller.scrollHeight; scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
-        await delay(250);
+        await latestViewport(config, scroller, initial.identity, valid);
       }
     }
     if (!valid()) throw new Error("History loading was cancelled.");
@@ -406,8 +425,10 @@
   function composer(config) { return one(config.selectors.composer, "message composer"); }
   function composerEmpty(config) {
     const editor = composer(config);
+    const queuedAttachments = all('[data-tid="attachment-card"], [data-tid="compose-attachment"]')
+      .filter(node => !node.closest(config.selectors.row) && !node.closest('[data-tid="chat-pane-item"]'));
     return !Core.normalize(text(editor)) && !editor.querySelector('img, [data-attachment-id], [contenteditable="false"]') &&
-      !document.querySelector('[data-tid="attachment-card"], [data-tid="compose-attachment"]');
+      queuedAttachments.length === 0;
   }
   function insert(config, reply) {
     const editor = composer(config);

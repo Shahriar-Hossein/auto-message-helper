@@ -212,6 +212,37 @@ test("sender changes invalidate a group draft", () => {
   assert.equal(Core.isFresh(original, changed), false);
 });
 
+test("reviewed group drafts tolerate newer messages and recycled older history", () => {
+  const original = { identity: "group-title", title: "Dev team", isGroup: true, atBottom: true,
+    messages: [{ id: "old", role: "other", author: "Kajal", text: "An older message" }, { id: "question", role: "other", author: "Tazeen", text: "Explain this" }] };
+  assert.equal(Core.groupDraftState(original, structuredClone(original)), "ready");
+  const changed = { ...original, messages: [original.messages.at(-1), { id: "new", role: "other", author: "Kajal", text: "One more thought" }] };
+  assert.equal(Core.isFresh(original, changed), false);
+  assert.equal(Core.groupDraftState(original, changed), "updated");
+  assert.equal(Core.groupDraftState(original, { ...original, atBottom: false }), "updated");
+});
+
+test("reviewed group actions reject wrong conversations and edited or missing source messages", () => {
+  const original = { identity: "group-title", title: "Dev team", isGroup: true, atBottom: true,
+    messages: [{ id: "question", role: "other", author: "Tazeen", text: "Explain this" }] };
+  assert.equal(Core.groupDraftState(original, { ...original, identity: "other-group" }), "conversation");
+  assert.equal(Core.groupDraftState(original, { ...original, title: "Other team" }), "conversation");
+  assert.equal(Core.groupDraftState(original, { ...original, isGroup: false }), "conversation");
+  assert.equal(Core.groupDraftState(original, { ...original, messages: [{ ...original.messages[0], id: "different-question" }] }), "unavailable");
+  for (const update of [{ author: "Kajal" }, { text: "Edited question" }, { role: "me" }]) {
+    assert.equal(Core.groupDraftState(original, { ...original, messages: [{ ...original.messages[0], ...update }] }), "edited");
+  }
+});
+
+test("group draft source checks normalize whitespace and flag media preview updates for review", () => {
+  const original = { identity: "group", title: "Dev team", isGroup: true, atBottom: true,
+    messages: [{ id: "question", role: "other", author: "Tazeen", text: "Explain\nthis", media: [{ kind: "image", label: "photo", key: "blob:one" }] }] };
+  const formatted = structuredClone(original); formatted.messages[0].text = "Explain this";
+  assert.equal(Core.groupDraftState(original, formatted), "updated");
+  formatted.messages[0].media[0].key = "blob:another";
+  assert.equal(Core.groupDraftState(original, formatted), "updated");
+});
+
 test("previous default context budgets migrate once and current custom budgets survive", () => {
   assert.equal(Core.settings({ contextVersion: 2, maxContextChars: 12000 }).maxContextChars, 24000);
   assert.equal(Core.settings({ maxContextChars: 6000 }).maxContextChars, 24000);

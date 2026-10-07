@@ -65,6 +65,14 @@
       const copy = editor.cloneNode(); main.append(copy);
       fail(() => TeamsReplyAdapter.composerEmpty(testState.config), /found 2/); copy.remove();
     });
+    check("received attachments do not count as an unsent composer draft", () => {
+      const received = document.createElement("div"); received.dataset.tid = "attachment-card"; received.textContent = "Already received screenshot";
+      list.firstElementChild.append(received);
+      assert(TeamsReplyAdapter.composerEmpty(testState.config), "Received attachment blocked drafting");
+      received.remove();
+      const queued = document.createElement("div"); queued.dataset.tid = "attachment-card"; queued.textContent = "Unsent attachment"; main.append(queued);
+      assert(!TeamsReplyAdapter.composerEmpty(testState.config), "Unsent attachment was not protected"); queued.remove();
+    });
     let inputCount = 0;
     const countInput = () => { inputCount++; };
     const removeCaret = () => document.getSelection().removeAllRanges();
@@ -618,12 +626,79 @@
     check("groups without stable IDs can prepare drafts but cannot send automatically", () => {
       assert($("draft").value === "Sounds good!" && testState.sendCount === groupSends + 1, "Title-bound group draft failed");
     });
-    await click("pause"); await click("send");
-    check("sending a group draft still requires a stable conversation ID", () => assert(testState.sendCount === groupSends + 1 && $("status").textContent.includes("stable conversation identity"), "A title-bound group draft was sent"));
+    await click("pause"); await click("send"); await tick();
+    check("explicit sending works for a selected group without a Teams conversation ID", () => assert(testState.sendCount === groupSends + 2 && $("status").textContent.includes("Reply appeared"), "Reviewed title-bound group draft was blocked"));
     await click("dismiss");
     main.dataset.chatType = "channel";
     check("channels remain excluded", () => fail(() => TeamsReplyAdapter.snapshot(testState.config), /channels are not supported/));
     main.removeAttribute("data-chat-type");
+    main.dataset.chatType = "group"; title.textContent = "Na khete pawa dev team";
+    list.replaceChildren();
+    for (let i = 0; i < 50; i++) groupMessage(`busy-group-${i}`, i % 2 ? "Rakibur Rahman" : "Me", i === 49 ? "Boss is always right 🤔" : `Earlier discussion ${i}`);
+    await click("select");
+    let resolveGroupReply;
+    testState.response = () => new Promise(resolve => { resolveGroupReply = resolve; });
+    await click("preview");
+    list.firstElementChild.remove(); // Teams evicts older virtualized rows.
+    list.children[3].querySelector("p").append(" (quote preview loaded)");
+    groupMessage("busy-group-new", "Tazeen", "We should fix performance first");
+    resolveGroupReply({ ok: true, reply: "Performance issues first, then validate the requested features." }); await wait(); await wait();
+    testState.response = null;
+    check("busy group replies stay reviewable when new messages and older-row updates arrive during inference", () => {
+      assert($("draft").value.includes("Performance issues first") && $("status").textContent.includes("review"), "Group reply was discarded for normal Teams updates");
+      assert($("context").textContent.includes("group drafts and explicit sending available"), "Missing group ID was reported as a manual-send blocker");
+    });
+    const reviewedGroupSends = testState.sendCount;
+    // Same group name, different source messages: never post a draft into it.
+    const source = list.querySelector('[data-message-id="busy-group-49"]'); source.dataset.messageId = "same-name-other-group";
+    await click("send");
+    check("a same-name group without the original message cannot receive the draft", () => assert(testState.sendCount === reviewedGroupSends && $("draft").value && $("status").textContent.includes("original message"), "Title-only matching sent into another group"));
+    source.dataset.messageId = "busy-group-49";
+    await click("send"); await tick();
+    check("a reviewed group draft can be sent after newer messages without a stable chat ID", () => assert(testState.sendCount === reviewedGroupSends + 1 && $("status").textContent.includes("Reply appeared"), "New messages or recycled rows blocked explicit group sending"));
+    groupMessage("busy-group-typing", "Tazeen", "What should we prioritize?"); await click("select");
+    testState.response = () => new Promise(resolve => { resolveGroupReply = resolve; });
+    await click("preview");
+    editor.textContent = "Keep my own reply";
+    resolveGroupReply({ ok: true, reply: "Measure the slow flows and fix the worst regression first." }); await wait(); await wait();
+    testState.response = null;
+    check("composer changes during group inference preserve both the human's text and the model draft", () => assert(editor.textContent === "Keep my own reply" && $("draft").value.includes("Measure the slow flows"), "Human composer edit erased the group draft"));
+    await click("send");
+    check("explicit group sending still preserves existing composer text", () => assert(editor.textContent === "Keep my own reply" && testState.sendCount === reviewedGroupSends + 1, "Existing composer text was overwritten or sent"));
+    editor.textContent = ""; await click("dismiss");
+    await click("generate"); await tick();
+    check("Generate and send explicitly works in an ID-less group", () => assert(testState.sendCount === reviewedGroupSends + 2 && $("status").textContent.includes("Reply appeared"), "Explicit group generation still requires an unavailable Teams ID"));
+    groupMessage("busy-group-switch", "Rakibur Rahman", "Another question"); await click("select");
+    testState.response = () => new Promise(resolve => { resolveGroupReply = resolve; });
+    await click("preview"); title.textContent = "Another group";
+    resolveGroupReply({ ok: true, reply: "Reply for the old group" }); await wait(); await wait();
+    testState.response = null;
+    check("actual group switches still discard in-flight replies", () => assert(!$("draft").value && testState.sendCount === reviewedGroupSends + 2, "Reply leaked into another group"));
+    title.textContent = "Na khete pawa dev team";
+    let groupHistoryStart = 45;
+    const groupHistoryRows = start => {
+      list.replaceChildren();
+      for (let i = start; i < start + 15; i++) {
+        const row = document.createElement("div"); row.dataset.tid = "chat-pane-message"; row.dataset.messageId = `group-virtual-${i}`;
+        row.dataset.authorName = start === 0 ? "Me" : ["Me", "Kajal", "Tazeen"][i % 3]; row.style.height = "60px";
+        const body = document.createElement("p"); body.dataset.tid = "message-body"; body.textContent = `Group history ${i}`; row.append(body); list.append(row);
+      }
+    };
+    const loadGroupHistory = event => {
+      if (event.isTrusted) return;
+      if (list.scrollTop === 0) { groupHistoryStart = Math.max(5, groupHistoryStart - 10); groupHistoryRows(groupHistoryStart); }
+      else groupHistoryRows(45);
+    };
+    groupHistoryRows(0); list.scrollTop = 0; list.addEventListener("scroll", loadGroupHistory);
+    await click("select"); await click("preview"); await new Promise(resolve => setTimeout(resolve, 800));
+    list.removeEventListener("scroll", loadGroupHistory);
+    check("group preview from an older viewport loads the latest fifty turns and restores the latest messages", () => {
+      const payload = testState.requests.filter(m => m.type === "generate").at(-1);
+      assert($("draft").value === "Sounds good!" && payload.isGroup && payload.messages.length === 50, `Scrolled group could not draft: ${$("status").textContent}`);
+      assert(payload.messages.every((m, i) => m.id === `group-virtual-${i + 10}`), "Group draft used older messages or lost history order");
+      assert(TeamsReplyAdapter.snapshot(testState.config).atBottom && list.lastElementChild.dataset.messageId === "group-virtual-59", "Group's latest viewport was not restored");
+    });
+    await click("dismiss"); main.removeAttribute("data-chat-type");
     document.getElementById("test-result").textContent = `PASS (${checked.length} browser checks)\n${checked.join("\n")}`;
     document.documentElement.dataset.testResult = "pass";
   } catch (error) {

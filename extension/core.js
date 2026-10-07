@@ -179,7 +179,20 @@
     return current.atBottom && original.identity === current.identity && fingerprint(original) === fingerprint(current) &&
       current.messages.at(-1)?.role === "other";
   }
-  const api = { DEFAULTS, DEFAULT_SELECTORS, LEGACY_SELECTORS, CHUCKLES_INTRO, normalize, endpoint, settings, monitorSettings, conversationConfig, contextWindow, modelRequest, replyLanguage, introduction, replyText, fingerprint, isFresh };
+  function groupDraftState(original, current) {
+    if (!original?.isGroup || !current.isGroup || original.identity !== current.identity || original.title !== current.title) return "conversation";
+    // A title alone is not enough. Bind explicit group actions to the actual
+    // message the draft was generated for, even when Teams exposes no chat ID.
+    const anchor = original.messages.at(-1);
+    const loaded = current.messages.find(m => m.id === anchor?.id);
+    if (!loaded) return "unavailable";
+    // Loading or refreshing media previews is a reviewable context update,
+    // while changing the actual source text or sender invalidates the draft.
+    const content = m => JSON.stringify([m.role, m.author, normalize(m.text)]);
+    if (content(anchor) !== content(loaded)) return "edited";
+    return isFresh(original, current) ? "ready" : "updated";
+  }
+  const api = { DEFAULTS, DEFAULT_SELECTORS, LEGACY_SELECTORS, CHUCKLES_INTRO, normalize, endpoint, settings, monitorSettings, conversationConfig, contextWindow, modelRequest, replyLanguage, introduction, replyText, fingerprint, isFresh, groupDraftState };
   root.TeamsReplyCore = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(globalThis);
