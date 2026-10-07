@@ -243,6 +243,35 @@ test("group draft source checks normalize whitespace and flag media preview upda
   assert.equal(Core.groupDraftState(original, formatted), "updated");
 });
 
+test("group sending tolerates recycled history and older media refreshes", () => {
+  const original = { identity: "group-title", title: "Dev team", isGroup: true, atBottom: true,
+    messages: [{ id: "old", role: "other", author: "Kajal", text: "Earlier", media: [{ kind: "image", label: "photo", key: "blob:old" }] },
+      { id: "question", role: "other", author: "Tazeen", text: "Explain\nthis" }] };
+  assert.equal(Core.groupSendFresh(original, structuredClone(original)), true);
+  const recycled = { ...original, messages: [{ ...original.messages.at(-1), text: "Explain this" }] };
+  assert.equal(Core.isFresh(original, recycled), false);
+  assert.equal(Core.groupSendFresh(original, recycled), true);
+  const reloaded = structuredClone(original);
+  reloaded.messages[0].media[0].key = "blob:reloaded";
+  reloaded.messages.unshift({ id: "older", role: "me", author: "Me", text: "Old history loaded" });
+  assert.equal(Core.groupSendFresh(original, reloaded), true);
+});
+
+test("group sending rejects newer messages, context edits, source media changes, and wrong chats", () => {
+  const original = { identity: "group-title", title: "Dev team", isGroup: true, atBottom: true,
+    messages: [{ id: "old", role: "other", author: "Kajal", text: "Earlier" },
+      { id: "question", role: "other", author: "Tazeen", text: "Explain this", media: [{ kind: "image", label: "photo", key: "blob:source" }] }] };
+  const variants = [{ ...original, identity: "different" }, { ...original, title: "Other team" },
+    { ...original, atBottom: false }, { ...original, isGroup: false },
+    { ...original, messages: original.messages.slice(0, 1) }];
+  for (const role of ["me", "other"]) variants.push({ ...original, messages: [...original.messages, { id: "new", role, author: "Kajal", text: "New reply" }] });
+  for (const index of [0, 1]) for (const update of [{ text: "Edited" }, { author: "Other sender" }, { role: "me" }]) {
+    const edited = structuredClone(original); Object.assign(edited.messages[index], update); variants.push(edited);
+  }
+  const mediaChanged = structuredClone(original); mediaChanged.messages[1].media[0].key = "blob:changed"; variants.push(mediaChanged);
+  for (const changed of variants) assert.equal(Core.groupSendFresh(original, changed), false);
+});
+
 test("previous default context budgets migrate once and current custom budgets survive", () => {
   assert.equal(Core.settings({ contextVersion: 2, maxContextChars: 12000 }).maxContextChars, 24000);
   assert.equal(Core.settings({ maxContextChars: 6000 }).maxContextChars, 24000);

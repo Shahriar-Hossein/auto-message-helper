@@ -20,7 +20,7 @@
     details{margin-top:10px}pre{white-space:pre-wrap;max-height:180px;overflow:auto;background:#151827;padding:8px;border-radius:7px}
     [hidden]{display:none!important}small{color:#b8bfd7}
   </style><section aria-label="Teams Local Replies">
-    <header><strong>Local Replies <small>v0.2.8</small></strong><button id="collapse" aria-label="Collapse panel">−</button></header>
+    <header><strong>Local Replies <small>v0.2.9</small></strong><button id="collapse" aria-label="Collapse panel">−</button></header>
     <div id="controls">
       <p id="selected">No chat selected</p><p id="status" role="status">Paused. Open Settings to configure your model and name.</p>
       <div class="row"><button id="settings">Settings</button><button class="primary" id="select">Select this chat</button><button id="diagnose">Check Teams page</button></div>
@@ -88,7 +88,7 @@
   }
   function inspect(snapshot) {
     $("copy-report").hidden = true;
-    $("context").textContent = `${snapshot.title}\nConversation key: ${snapshot.chatId || (snapshot.isGroup ? "not exposed by Teams (group drafts and explicit sending available)" : "not available (automatic sending disabled)")}\n\n` +
+    $("context").textContent = `${snapshot.title}\nConversation key: ${snapshot.chatId || (snapshot.isGroup ? "not exposed by Teams (selected-group sending bound to the source message)" : "not available (automatic sending disabled)")}\n\n` +
       snapshot.messages.map(m => `${m.role === "me" ? "Me" : m.author}: ${m.text}${(m.media || []).map(item => ` [${item.kind}: ${item.label}]`).join("")}`).join("\n\n");
   }
   function showPageCheck(error) {
@@ -111,11 +111,13 @@
     if (state === "unavailable") throw new Error("The draft's original message is no longer loaded. Scroll to the latest messages or generate a new draft.");
     if (state === "edited") throw new Error("This draft is stale because its original message or sender changed. Dismiss it and generate a new one.");
   }
-  async function deliver(snapshot, reply, version, revision, manual) {
+  async function deliver(snapshot, reply, version, revision, manual, reviewed = false) {
     const fresh = () => {
       if (version !== epoch || !manual && !running || revision !== userRevision) return false;
-      if (manual && snapshot.isGroup) {
-        const state = Core.groupDraftState(snapshot, current(false));
+      if (snapshot.isGroup) {
+        const latest = current(false);
+        if (!reviewed) return Core.groupSendFresh(snapshot, latest);
+        const state = Core.groupDraftState(snapshot, latest);
         return state === "ready" || state === "updated";
       }
       return Core.isFresh(snapshot, current());
@@ -141,9 +143,7 @@
     if (busy) throw new Error("A reply is already being generated.");
     if ($("draft").value.trim()) throw new Error("Insert or dismiss the existing draft before generating another reply.");
     let snapshot = current(!(manual && selected?.isGroup));
-    // Group monitoring prepares reviewable drafts; explicit send actions still send.
-    if (snapshot.isGroup && !manual) replyMode = "draft";
-    if (replyMode === "auto" && !snapshot.chatId && !(manual && snapshot.isGroup)) throw new Error("Automatic sending requires a stable conversation identity.");
+    if (replyMode === "auto" && !snapshot.chatId && !snapshot.isGroup) throw new Error("Automatic sending requires a stable conversation identity.");
     if (snapshot.messages.at(-1).role !== "other" && !(manual && snapshot.isGroup)) throw new Error("The latest message is yours. Waiting for the other person.");
     if (!Teams.composerEmpty(config)) throw new Error("Your composer contains a draft or attachment. It was preserved.");
     const version = epoch, revision = userRevision;
@@ -173,7 +173,7 @@
         const state = Core.groupDraftState(snapshot, latest);
         // Preserve a useful group reply in the panel when the discussion, lazy
         // media, virtualized history, scroll position, or composer changes.
-        if (replyMode === "auto" && manual && state === "ready" && revision === userRevision && Teams.composerEmpty(config)) {
+        if (replyMode === "auto" && (manual || running) && Core.groupSendFresh(snapshot, latest) && revision === userRevision && Teams.composerEmpty(config)) {
           await deliver(snapshot, reply, version, revision, manual);
         } else {
           keepDraft(snapshot, reply);
@@ -183,8 +183,12 @@
             status("Group reply kept as a draft. Its original message changed or is no longer loaded; review it and regenerate before sending.");
           } else if (revision !== userRevision || !Teams.composerEmpty(config)) {
             status("Group draft ready. Your Teams composer changed and was preserved; clear or send its text before inserting this draft.");
+          } else if (replyMode === "auto" && !latest.atBottom) {
+            status("Group reply kept as a draft. Scroll to the latest messages and review it before Send reply.");
+          } else if (replyMode === "auto" && !Core.groupSendFresh(snapshot, latest)) {
+            status("Group reply kept as a draft. New messages or message content changed during generation; review it before Send reply.");
           } else if (state === "updated") {
-            status("Group draft ready. New messages or loaded context changed; review the draft against the conversation before Send reply.");
+            status("Group draft ready. Loaded context changed; review the draft against the conversation before Send reply.");
           } else status("Group draft ready. Use Send reply to send it, or Insert draft to edit it in Teams.");
         }
         return;
@@ -265,7 +269,7 @@
     }
     $("mode").value = selectedMode; $("scope").value = scope;
     $("start").disabled = true; $("pause").disabled = false; $("mode").disabled = true; $("scope").disabled = true;
-    status(`Watching ${scope === "all" ? "all unread direct chats" : snapshot?.isGroup ? "this group (50-message context)" : "this chat"} (${scope === "selected" && snapshot?.isGroup || selectedMode === "draft" ? "draft mode" : "automatic send"}). Enabled across reloads.`);
+    status(`Watching ${scope === "all" ? "all unread direct chats" : snapshot?.isGroup ? "this group (50-message context)" : "this chat"} (${selectedMode === "draft" ? "draft mode" : "automatic send"}). Enabled across reloads.`);
     if (scope === "all") {
       unreadQueue.clear(); unreadSeen.clear(); unsupportedChats.clear(); scanDue = 0;
       await scanInbox(true);
@@ -288,7 +292,7 @@
     try {
       await request({ type: "claim" });
       if (version !== epoch) return;
-      await deliver(snapshot, reply, version, revision, true);
+      await deliver(snapshot, reply, version, revision, true, true);
     } finally {
       busy = false;
       if (!running && !pendingDelivery) void request({ type: "release" }).catch(() => {});

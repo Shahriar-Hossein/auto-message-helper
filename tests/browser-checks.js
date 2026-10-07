@@ -586,8 +586,8 @@
     const sendReport = TeamsReplyAdapter.diagnostics(probeConfig);
     check("page checks report Send control type and disabled state without reply text", () => assert(sendReport.includes("Send control: svg role=none; disabled=false") && !sendReport.includes("Only this reply"), "Send diagnostic metadata missing or text exposed"));
     probeWrapper.remove(); editor.textContent = "";
-    // A selected group uses fifty messages, preserves speaker names, and drafts
-    // automatically even when direct-chat monitoring is set to Automatic send.
+    // A selected group uses fifty messages, preserves speaker names, and follows
+    // the selected Automatic send or Draft mode.
     main.dataset.chatId = "group-work"; main.dataset.chatType = "group"; title.textContent = "Product discussion";
     list.replaceChildren();
     const groupMessage = (id, author, message) => {
@@ -612,23 +612,54 @@
     check("a reviewed group draft can be sent explicitly", () => assert(testState.sendCount === groupSends + 1 && !$("draft").value, "Reviewed group draft was not sent"));
     $("scope").value = "selected"; $("mode").value = "auto"; await click("start");
     groupMessage("group-addressed", "Kajal", "Chuckles, suggest the next fix"); await tick(); testState.now += 1100; await tick();
-    check("selected-group monitoring creates drafts while direct-chat mode stays automatic", () => {
-      assert(testState.sendCount === groupSends + 1 && $("draft").value === "Sounds good!", "Group monitoring posted an unreviewed draft");
+    await tick();
+    check("selected-group monitoring honors Automatic send and confirms delivery", () => {
+      assert(testState.sendCount === groupSends + 2 && !$("draft").value && $("status").textContent.includes("Reply appeared"), "Group Automatic send stopped at a draft");
       assert(testState.requests.filter(m => m.type === "attempted").at(-1).isGroup, "Group attempt check omitted its conversation type");
     });
+    await tick();
+    check("confirmed automatic group delivery is not repeated", () => assert(testState.sendCount === groupSends + 2, "Group reply sent twice"));
+    await click("pause"); $("mode").value = "draft"; await click("start");
+    groupMessage("group-draft", "Kajal", "Chuckles, prepare this for review"); await tick(); testState.now += 1100; await tick();
+    check("selected-group Draft mode still waits for review", () => assert(testState.sendCount === groupSends + 2 && $("draft").value === "Sounds good!" && $("status").textContent.includes("Group draft ready"), "Group Draft mode posted automatically"));
     const groupAuthor = list.lastElementChild.dataset.authorName; list.lastElementChild.dataset.authorName = "Tazeen";
     await click("send");
-    check("sender changes make existing group drafts stale", () => assert(testState.sendCount === groupSends + 1 && $("status").textContent.includes("stale"), "Changed group sender received a stale reply"));
+    check("sender changes make existing group drafts stale", () => assert(testState.sendCount === groupSends + 2 && $("status").textContent.includes("stale"), "Changed group sender received a stale reply"));
     list.lastElementChild.dataset.authorName = groupAuthor;
     await click("pause"); await click("dismiss");
-    main.removeAttribute("data-chat-id"); await click("select"); await click("start");
+    main.removeAttribute("data-chat-id"); await click("select"); $("mode").value = "auto"; await click("start");
     groupMessage("group-no-id", "Tazeen", "Can you summarize this?"); await tick(); testState.now += 1100; await tick();
-    check("groups without stable IDs can prepare drafts but cannot send automatically", () => {
-      assert($("draft").value === "Sounds good!" && testState.sendCount === groupSends + 1, "Title-bound group draft failed");
+    await tick();
+    check("selected groups without chat IDs send automatically using the source message", () => {
+      assert(!$("draft").value && testState.sendCount === groupSends + 3 && $("status").textContent.includes("Reply appeared"), "Source-bound group Automatic send stopped at a draft");
     });
-    await click("pause"); await click("send"); await tick();
-    check("explicit sending works for a selected group without a Teams conversation ID", () => assert(testState.sendCount === groupSends + 2 && $("status").textContent.includes("Reply appeared"), "Reviewed title-bound group draft was blocked"));
-    await click("dismiss");
+    await click("pause"); groupMessage("group-no-id-preview", "Tazeen", "Can you explain this too?"); await click("preview"); await click("send"); await tick();
+    check("explicit sending works for a selected group without a Teams conversation ID", () => assert(testState.sendCount === groupSends + 4 && $("status").textContent.includes("Reply appeared"), "Reviewed title-bound group draft was blocked"));
+    await click("start");
+    const recycledMedia = document.createElement("img"); recycledMedia.alt = "Older photo"; recycledMedia.src = "data:image/png;base64,AA=="; list.children[40].append(recycledMedia);
+    let resolveAutomaticGroup;
+    testState.response = () => new Promise(resolve => { resolveAutomaticGroup = resolve; });
+    groupMessage("group-auto-recycled", "Kajal", "Ke ache ekhane?"); await tick(); testState.now += 1100;
+    const groupGeneration = tick(); await new Promise(resolve => setTimeout(resolve, 800));
+    assert(typeof resolveAutomaticGroup === "function", `Automatic group generation did not begin: ${$("status").textContent}`);
+    list.children[20].remove(); recycledMedia.alt = "Older preview refreshed"; list.scrollTop = list.scrollHeight;
+    resolveAutomaticGroup({ ok: true, reply: "Ami achi toh! 😎" }); await groupGeneration; await tick(); testState.response = null;
+    check("automatic group replies send through older-row recycling and media refreshes", () => assert(testState.sendCount === groupSends + 5 && !$("draft").value && $("status").textContent.includes("Reply appeared"), `Normal Teams history updates blocked group sending: ${$("status").textContent}`));
+    testState.response = () => new Promise(resolve => { resolveAutomaticGroup = resolve; });
+    groupMessage("group-auto-pending", "Kajal", "What is next?"); await tick(); testState.now += 1100;
+    resolveAutomaticGroup = null;
+    const changedGroupGeneration = tick(); await new Promise(resolve => setTimeout(resolve, 800));
+    assert(typeof resolveAutomaticGroup === "function", `Next automatic group generation did not begin: ${$("status").textContent}`);
+    groupMessage("group-auto-newer", "Tazeen", "One more question before you reply");
+    resolveAutomaticGroup({ ok: true, reply: "Reply to the earlier question" }); await changedGroupGeneration; testState.response = null;
+    check("new messages during automatic group inference keep the reply for review", () => assert(testState.sendCount === groupSends + 5 && $("draft").value === "Reply to the earlier question" && $("status").textContent.includes("New messages"), "Stale automatic group reply was sent"));
+    await click("pause"); await click("dismiss");
+    pwaSend.setAttribute("aria-disabled", "true");
+    await click("generate");
+    groupMessage("group-after-insert", "Kajal", "Changed while Send was disabled");
+    pwaSend.setAttribute("aria-disabled", "false"); await new Promise(resolve => setTimeout(resolve, 400));
+    check("Generate and send rechecks group freshness while waiting for Send", () => assert(testState.sendCount === groupSends + 5 && $("draft").value && $("status").textContent.includes("conversation changed"), "Generated group reply sent after a newer message arrived during insertion"));
+    editor.textContent = ""; await click("dismiss");
     main.dataset.chatType = "channel";
     check("channels remain excluded", () => fail(() => TeamsReplyAdapter.snapshot(testState.config), /channels are not supported/));
     main.removeAttribute("data-chat-type");
@@ -646,7 +677,7 @@
     testState.response = null;
     check("busy group replies stay reviewable when new messages and older-row updates arrive during inference", () => {
       assert($("draft").value.includes("Performance issues first") && $("status").textContent.includes("review"), "Group reply was discarded for normal Teams updates");
-      assert($("context").textContent.includes("group drafts and explicit sending available"), "Missing group ID was reported as a manual-send blocker");
+      assert($("context").textContent.includes("selected-group sending bound to the source message"), "Missing group ID was reported as a send blocker");
     });
     const reviewedGroupSends = testState.sendCount;
     // Same group name, different source messages: never post a draft into it.

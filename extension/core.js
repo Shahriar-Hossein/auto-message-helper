@@ -192,7 +192,21 @@
     if (content(anchor) !== content(loaded)) return "edited";
     return isFresh(original, current) ? "ready" : "updated";
   }
-  const api = { DEFAULTS, DEFAULT_SELECTORS, LEGACY_SELECTORS, CHUCKLES_INTRO, normalize, endpoint, settings, monitorSettings, conversationConfig, contextWindow, modelRequest, replyLanguage, introduction, replyText, fingerprint, isFresh, groupDraftState };
+  function groupSendFresh(original, current) {
+    const state = groupDraftState(original, current);
+    if (!["ready", "updated"].includes(state) || !current.atBottom) return false;
+    const anchor = original.messages.at(-1), latest = current.messages.at(-1);
+    if (!anchor?.id || latest?.id !== anchor.id || latest.role !== "other") return false;
+    const content = m => JSON.stringify([m.role, m.author, normalize(m.text)]);
+    // Older rows can be evicted or loaded without changing the pending turn.
+    // Actual edits to loaded context and changes to the source media still stop
+    // sending; a reviewed draft can use the more permissive groupDraftState.
+    const loaded = new Map(current.messages.map(m => [m.id, m]));
+    if (original.messages.some(m => loaded.has(m.id) && content(m) !== content(loaded.get(m.id)))) return false;
+    const media = m => JSON.stringify(m.media?.map(({ kind, label, key }) => [kind, label, key]) || []);
+    return media(anchor) === media(latest);
+  }
+  const api = { DEFAULTS, DEFAULT_SELECTORS, LEGACY_SELECTORS, CHUCKLES_INTRO, normalize, endpoint, settings, monitorSettings, conversationConfig, contextWindow, modelRequest, replyLanguage, introduction, replyText, fingerprint, isFresh, groupDraftState, groupSendFresh };
   root.TeamsReplyCore = api;
   if (typeof module !== "undefined" && module.exports) module.exports = api;
 })(globalThis);
