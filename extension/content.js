@@ -20,7 +20,7 @@
     details{margin-top:10px}pre{white-space:pre-wrap;max-height:180px;overflow:auto;background:#151827;padding:8px;border-radius:7px}
     [hidden]{display:none!important}small{color:#b8bfd7}
   </style><section aria-label="Teams Local Replies">
-    <header><strong>Local Replies <small>v0.2.6</small></strong><button id="collapse" aria-label="Collapse panel">−</button></header>
+    <header><strong>Local Replies <small>v0.2.7</small></strong><button id="collapse" aria-label="Collapse panel">−</button></header>
     <div id="controls">
       <p id="selected">No chat selected</p><p id="status" role="status">Paused. Open Settings to configure your model and name.</p>
       <div class="row"><button id="settings">Settings</button><button class="primary" id="select">Select this chat</button><button id="diagnose">Check Teams page</button></div>
@@ -80,7 +80,7 @@
     finally { inserting = false; }
   }
   function current() {
-    if (!selected) throw new Error("Open a one-to-one chat and click Select this chat first.");
+    if (!selected) throw new Error("Open a direct or group chat and click Select this chat first.");
     const result = Teams.snapshot(config);
     if (result.identity !== selected.identity || result.title !== selected.title) throw new Error("The selected conversation changed. Select it again before starting.");
     if (!result.atBottom) throw new Error(result.hasScroller ? "Scroll to the bottom of the chat before continuing." : "Cannot identify the message scroller. Update its selector in Settings.");
@@ -123,6 +123,8 @@
     if (busy) throw new Error("A reply is already being generated.");
     if ($("draft").value.trim()) throw new Error("Insert or dismiss the existing draft before generating another reply.");
     let snapshot = current();
+    // Group monitoring prepares reviewable drafts; explicit send actions still send.
+    if (snapshot.isGroup && !manual) replyMode = "draft";
     if (replyMode === "auto" && !snapshot.chatId) throw new Error("Automatic sending requires a stable conversation identity.");
     if (snapshot.messages.at(-1).role !== "other") throw new Error("The latest message is yours. Waiting for the other person.");
     if (!Teams.composerEmpty(config)) throw new Error("Your composer contains a draft or attachment. It was preserved.");
@@ -144,7 +146,8 @@
       inspect({ ...snapshot, messages: history });
       status(`Generating locally from ${history.length} recent messages, including media…`);
       const { reply } = await request({ type: "generate", identity: snapshot.identity,
-        messages: history.map(({ id, text, role, media }) => ({ id, text: text.slice(0, config.maxContextChars), role, ...(media?.length ? { media } : {}) })), manual });
+        isGroup: snapshot.isGroup,
+        messages: history.map(({ id, text, role, author, media }) => ({ id, text: text.slice(0, Core.conversationConfig(config, snapshot.isGroup).maxContextChars), role, author, ...(media?.length ? { media } : {}) })), manual });
       if (version !== epoch) return;
       const latest = current();
       if (!Core.isFresh(snapshot, latest) || revision !== userRevision || !Teams.composerEmpty(config)) {
@@ -154,7 +157,7 @@
         await deliver(snapshot, reply, version, revision, manual);
       } else {
         keepDraft(snapshot, reply);
-        status("Preview ready (draft mode). Use Send reply to send it, or Insert draft to edit it in Teams.");
+        status(`${snapshot.isGroup ? "Group draft" : "Preview"} ready. Use Send reply to send it, or Insert draft to edit it in Teams.`);
       }
     } finally {
       busy = false;
@@ -207,7 +210,7 @@
     try { snapshot = scope === "selected" ? current() : Teams.snapshot(config); }
     catch (error) { if (scope === "selected") throw error; }
     if (snapshot) {
-      if (selectedMode === "auto" && !snapshot.chatId && scope === "selected") throw new Error("Automatic sending requires a stable conversation identity (chat ID or one-to-one participant ID). Draft mode is available.");
+      if (selectedMode === "auto" && !snapshot.isGroup && !snapshot.chatId && scope === "selected") throw new Error("Automatic sending requires a stable conversation identity (chat ID or one-to-one participant ID). Draft mode is available.");
       if (scope === "selected" && !Teams.composerEmpty(config)) throw new Error("Clear or send your existing Teams draft before starting.");
     }
     await request({ type: "claim" });
@@ -223,7 +226,7 @@
     }
     $("mode").value = selectedMode; $("scope").value = scope;
     $("start").disabled = true; $("pause").disabled = false; $("mode").disabled = true; $("scope").disabled = true;
-    status(`Watching ${scope === "all" ? "all unread direct chats" : "this chat"} (${selectedMode === "auto" ? "automatic send" : "draft mode"}). Enabled across reloads.`);
+    status(`Watching ${scope === "all" ? "all unread direct chats" : snapshot?.isGroup ? "this group (50-message context)" : "this chat"} (${scope === "selected" && snapshot?.isGroup || selectedMode === "draft" ? "draft mode" : "automatic send"}). Enabled across reloads.`);
     if (scope === "all") {
       unreadQueue.clear(); unreadSeen.clear(); unsupportedChats.clear(); scanDue = 0;
       await scanInbox(true);
@@ -374,6 +377,7 @@
           selected = null; $("generate").disabled = true; $("preview").disabled = true; $("selected").textContent = "Waiting for an unread direct chat";
           await navigateUnread(); return;
         }
+        if (snapshot.isGroup) { due = 0; await navigateUnread(); return; }
         if (!selected || snapshot.identity !== selected.identity) {
           bind(snapshot); baseline = marks.get(snapshot.identity) || Core.fingerprint(snapshot);
           due = snapshot.messages.at(-1)?.role === "other" ? Date.now() + config.debounceMs : 0;
@@ -407,7 +411,8 @@
       if (due && Date.now() >= due && !busy && !$("draft").value.trim()) {
         due = 0;
         const probe = await request({ type: "attempted", identity: snapshot.identity,
-          messages: snapshot.messages.map(({ id, text, role }) => ({ id, text, role })) });
+          isGroup: snapshot.isGroup,
+          messages: snapshot.messages.map(({ id, text, role, author }) => ({ id, text: text.slice(0, Core.conversationConfig(config, snapshot.isGroup).maxContextChars), role, author })) });
         if (!probe.attempted) await generate();
         else status("Latest incoming message was already handled. Watching for new messages.");
       }

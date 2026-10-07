@@ -46,7 +46,7 @@ test("one Teams window owns the active controller", async () => {
 test("automatic duplicate attempts are blocked; an explicit manual draft can retry", async () => {
   const h = harness();
   await h.send({ type: "claim", token: "a" });
-  assert.equal((await h.send(h.payload)).reply, Core.CHUCKLES_INTRO + "Hello!");
+  assert.equal((await h.send(h.payload)).reply, "Hello!");
   assert.equal((await h.send(h.payload)).ok, false);
   assert.equal(h.requests(), 1);
   assert.equal((await h.send({ ...h.payload, manual: true })).ok, true);
@@ -83,7 +83,7 @@ test("concurrent generations serialize reservation and allow only one fetch", as
   resolveFetch({ ok: true, json: async () => ({ message: { content: "Hello!" } }) });
   const result = await first;
   assert.equal(result.ok, true);
-  assert.equal(result.reply, Core.CHUCKLES_INTRO + "Hello!");
+  assert.equal(result.reply, "Hello!");
   assert.equal(h.requests(), 1);
 });
 test("invalid or outgoing context never reaches the local API", async () => {
@@ -117,7 +117,7 @@ test("the worker sends actual recent messages as the model conversation", async 
   ];
   const result = await h.send({ ...h.payload, messages });
   assert.equal(result.ok, true);
-  assert.equal(result.reply, Core.CHUCKLES_INTRO + "Yes, send me the report.");
+  assert.equal(result.reply, "Yes, send me the report.");
   assert.deepEqual(body.messages.slice(1), messages.map(m => ({ role: m.role === "me" ? "assistant" : "user", content: m.text })));
   assert.equal(body.messages.at(-1).content, messages.at(-1).text);
 });
@@ -155,7 +155,7 @@ test("wrong-language Banglish output is retried with strict guidance", async () 
   const result = await h.send({ ...h.payload, messages: [{ id: "banglish", role: "other", text: "ki korcho?" }] });
   assert.equal(result.ok, true); assert.equal(h.requests(), 2);
   assert.match(bodies[1].messages[0].content, /STRICT LANGUAGE CHECK/);
-  assert.ok(result.reply.startsWith(Core.introduction("Banglish")));
+  assert.equal(result.reply, "My hooman ekhon busy, bolo ki lagbe 😄");
 });
 test("persistent wrong-language output is rejected rather than sent", async () => {
   const h = harness(); await h.send({ type: "claim", token: "a" });
@@ -176,4 +176,59 @@ test("Ollama detects vision support and attaches pixels only for a vision model"
     assert.deepEqual(body.messages.at(-1).images, vision ? ["aGVsbG8="] : undefined);
     assert.match(body.messages.at(-1).content, /\[image: photo\]/);
   }
+});
+
+test("worker accepts fifty group messages, keeps speakers, and rejects oversized or unnamed groups", async () => {
+  let body;
+  const h = harness(async (_url, options) => {
+    body = JSON.parse(options.body);
+    return { ok: true, json: async () => ({ message: { content: "Start with performance fixes, then validate the most requested feature." } }) };
+  });
+  await h.send({ type: "claim", token: "a" });
+  const messages = Array.from({ length: 50 }, (_, i) => ({ id: String(i), role: "other", author: i % 2 ? "Kajal" : "Tazeen", text: `Discussion ${i}` }));
+  const result = await h.send({ ...h.payload, isGroup: true, messages });
+  assert.equal(result.ok, true);
+  assert.equal(body.messages.length, 51);
+  assert.match(body.messages.at(-1).content, /^\[Sender: Kajal\]/);
+  assert.equal((await h.send({ ...h.payload, type: "attempted", isGroup: true, messages })).attempted, true);
+  for (const invalid of [
+    { isGroup: true, messages: [...messages, messages[0]] },
+    { isGroup: true, messages: [{ id: "missing", role: "other", text: "Hi" }] },
+    { isGroup: true, messages: [{ id: "long-name", role: "other", text: "Hi", author: "x".repeat(201) }] },
+    { isGroup: "yes", messages },
+    { messages: [null] }
+  ]) assert.equal((await h.send({ ...h.payload, ...invalid })).ok, false);
+  assert.equal(h.requests(), 1);
+});
+
+test("worker accepts expanded direct-chat input and customized fifty-message windows", async () => {
+  const h = harness();
+  h.data.config = Core.settings({ contextVersion: 3, windowSize: 50, maxContextChars: 48000 });
+  await h.send({ type: "claim", token: "a" });
+  const messages = Array.from({ length: 50 }, (_, i) => ({ id: String(i), role: "other", text: i === 49 ? "x".repeat(20000) : `Discussion ${i}` }));
+  assert.equal((await h.send({ ...h.payload, messages })).ok, true);
+});
+
+test("Banglish checks inspect the whole reply after removing legacy introductions", async () => {
+  const h = harness(async () => ({ ok: true, json: async () => ({ message: { content: Core.introduction("Banglish") + "Bujhlam, age performance issue gula fix kori 😄" } }) }));
+  await h.send({ type: "claim", token: "a" });
+  const result = await h.send({ ...h.payload, messages: [{ id: "banglish", role: "other", text: "product er issue gula fix kori" }] });
+  assert.equal(result.ok, true);
+  assert.equal(result.reply, "Bujhlam, age performance issue gula fix kori 😄");
+  assert.equal(h.requests(), 1);
+});
+
+test("language correction keeps a large fifty-message group prompt inside its byte budget", async () => {
+  const bodies = [];
+  const h = harness(async (_url, options) => {
+    bodies.push(JSON.parse(options.body));
+    return { ok: true, json: async () => ({ message: { content: bodies.length === 1 ? "I can suggest some fixes." : "Age performance issue gula fix kori." } }) };
+  });
+  await h.send({ type: "claim", token: "a" });
+  const messages = Array.from({ length: 50 }, (_, i) => ({ id: String(i), role: "other", author: i % 2 ? "Kajal" : "Tazeen",
+    text: 'korchi \\"\n😀 '.repeat(1500), media: Array.from({ length: 4 }, () => ({ kind: "attachment", label: "x".repeat(500) })) }));
+  const result = await h.send({ ...h.payload, isGroup: true, messages });
+  assert.equal(result.ok, true);
+  assert.equal(bodies.length, 2);
+  assert.ok(bodies.every(body => Buffer.byteLength(JSON.stringify(body.messages)) <= 64000));
 });

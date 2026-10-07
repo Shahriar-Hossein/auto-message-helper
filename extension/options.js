@@ -13,7 +13,7 @@ async function save() {
   if (!form.reportValidity()) throw new Error("Complete the highlighted fields.");
   const raw = Object.fromEntries(new FormData(form));
   raw.selectors = JSON.parse(selectors.value);
-  raw.contextVersion = 2;
+  raw.contextVersion = 3;
   const config = TeamsReplyCore.settings(raw);
   for (const selector of Object.values(config.selectors)) document.querySelector(selector);
   await chrome.storage.local.set({ config });

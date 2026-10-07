@@ -22,8 +22,7 @@
   }
   function chatTitle(header) {
     const peers = participants(header);
-    if (peers.length > 1) throw unsupportedChat("More than one chat participant found. Only one-to-one chats are supported.");
-    return Core.normalize(text(peers[0] || header));
+    return Core.normalize(text(peers.length === 1 ? peers[0] : header));
   }
   function stableId(header, config) {
     // Never mistake a display name or generic /v2/ URL for a chat ID.
@@ -126,11 +125,14 @@
     }
     return null;
   }
-  function snapshot(config, limit = config.windowSize) {
+  function snapshot(config, limit) {
     if (!config.selfName) throw new Error("Set your exact Teams display name in Settings first.");
     const header = one(config.selectors.header, "chat title");
     const title = chatTitle(header);
     if (!title) throw new Error("The chat title is empty.");
+    if (header.closest('[data-chat-type="channel"], [data-conversation-type="channel"]') || /@thread\.tacv2/i.test(location.href)) {
+      throw unsupportedChat("Teams channels are not supported. Open a direct or group chat.");
+    }
     const rows = all(config.selectors.row);
     if (!rows.length) throw new Error("No text messages found. Open a chat or update the selectors.");
     const messages = [];
@@ -151,18 +153,17 @@
       lastTextRow = row;
     }
     if (!messages.length) throw new Error("No readable text messages found.");
-    if (authors.size > 2) throw unsupportedChat("More than two senders found. Only one-to-one chats are supported.");
     const otherNames = [...authors].filter(name => name !== config.selfName);
-    if (otherNames.length > 1) throw unsupportedChat("More than one other sender found. Only one-to-one chats are supported.");
-    if (otherNames.length === 1 && otherNames[0] !== title) {
-      throw new Error("The chat title must exactly match the other person's message author. Group chats and ambiguous names are excluded.");
-    }
-    const bounded = messages.slice(-limit);
-    Core.contextWindow(bounded, config); // Reject unknown senders before any inference.
+    const isGroup = participants(header).length > 1 || otherNames.length > 1 ||
+      !!header.closest('[data-chat-type="group"], [data-conversation-type="group"]') ||
+      otherNames.length === 1 && otherNames[0] !== title;
+    const chatConfig = Core.conversationConfig(config, isGroup);
+    const bounded = messages.slice(-(limit ?? chatConfig.windowSize));
+    Core.contextWindow(bounded, chatConfig); // Reject unknown senders before any inference.
     const chatId = stableId(header, config);
     const scroller = scrollerFor(lastTextRow, config);
     return {
-      title, chatId, identity: JSON.stringify([location.origin, chatId || title]), messages: bounded,
+      title, chatId, isGroup, identity: JSON.stringify([location.origin, chatId || title]), messages: bounded,
       atBottom: !!scroller && scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop < 80,
       hasScroller: !!scroller
     };
@@ -170,6 +171,7 @@
   const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
   async function recentHistory(config, valid = () => true) {
     const initial = snapshot(config);
+    config = Core.conversationConfig(config, initial.isGroup);
     const collected = captureMedia(initial, config);
     const mergeOlder = older => {
       const ids = new Set(collected.map(m => m.id));
@@ -184,7 +186,7 @@
         const previous = collected.length;
         scroller.scrollTop = 0; scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
         await delay(250);
-        const older = snapshot(config, 20);
+        const older = snapshot(config, config.windowSize);
         if (older.identity !== initial.identity) throw new Error("The conversation changed while loading history.");
         mergeOlder(captureMedia(older, config));
         if (collected.length === previous && step >= 2) break;
@@ -374,7 +376,10 @@
       await delay(250);
       if (!valid()) break;
       try {
+        // Teams can replace the header before replacing the outgoing chat's rows.
+        if (all(config.selectors.row).some(row => previousIds.has(messageId(row)))) continue;
         const result = snapshot(config);
+        if (result.isGroup) throw unsupportedChat("Group chats are available through Select this chat and Preview reply; the unread queue watches direct chats.");
         unsupported = ""; unsupportedCount = 0;
         if (result.title !== target.title || target.id && result.chatId !== target.id || !target.id && target.peer && result.chatId !== `direct:${target.peer}`) continue;
         const mark = Core.fingerprint(result);

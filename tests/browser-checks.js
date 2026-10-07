@@ -50,13 +50,13 @@
       assert(snap.messages.length === 2 && snap.messages[0].role === "me" && snap.messages[1].role === "other", "Incorrect sender labels");
       assert(snap.chatId === "chat-a" && snap.atBottom, "Chat ID / bottom detection failed");
     });
-    check("unknown authors and group-like titles rejected", () => {
+    check("unknown authors rejected and named group chats recognized", () => {
       const author = list.querySelector('[data-tid="message-author-name"]'); const original = author.textContent;
       author.textContent = ""; fail(() => TeamsReplyAdapter.snapshot(testState.config), /identify every sender/); author.textContent = original;
       const other = list.querySelectorAll('[data-tid="message-author-name"]')[1];
       other.textContent = ""; fail(() => TeamsReplyAdapter.snapshot(testState.config), /identify every sender/); other.textContent = "Alice";
       const title = document.querySelector("h1"); title.textContent = "Group chat";
-      fail(() => TeamsReplyAdapter.snapshot(testState.config), /title must exactly match/); title.textContent = "Alice";
+      assert(TeamsReplyAdapter.snapshot(testState.config).isGroup, "Named group was rejected"); title.textContent = "Alice";
     });
     check("draft and ambiguous composer protection", () => {
       editor.textContent = "My unfinished draft";
@@ -196,13 +196,14 @@
       assert(snap.chatId === "direct:8:live:fixture-peer", "Recipient identity not detected");
       assert(!$("start").disabled && !$("generate").disabled, `Reported chat selection failed: ${$("status").textContent}`);
     });
-    check("recipient identity distinguishes chats and rejects multiple participants", () => {
+    check("recipient identity distinguishes direct chats and never invents a group ID from a participant", () => {
       const original = TeamsReplyAdapter.snapshot(testState.config).identity;
       peer.dataset.tid = "participant-8:live:another-peer";
       assert(TeamsReplyAdapter.snapshot(testState.config).identity !== original, "Different recipient kept same identity");
       peer.dataset.tid = "participant-8:live:fixture-peer";
       const second = peer.cloneNode(true); second.dataset.tid = "participant-8:live:second-peer"; menu.append(second);
-      fail(() => TeamsReplyAdapter.snapshot(testState.config), /More than one chat participant/); second.remove();
+      const group = TeamsReplyAdapter.snapshot(testState.config);
+      assert(group.isGroup && !group.chatId, "Group inherited a single participant's direct-chat ID"); second.remove();
     });
     check("diagnostics redact immutable participant IDs", () => {
       const report = TeamsReplyAdapter.diagnostics(testState.config);
@@ -577,6 +578,52 @@
     const sendReport = TeamsReplyAdapter.diagnostics(probeConfig);
     check("page checks report Send control type and disabled state without reply text", () => assert(sendReport.includes("Send control: svg role=none; disabled=false") && !sendReport.includes("Only this reply"), "Send diagnostic metadata missing or text exposed"));
     probeWrapper.remove(); editor.textContent = "";
+    // A selected group uses fifty messages, preserves speaker names, and drafts
+    // automatically even when direct-chat monitoring is set to Automatic send.
+    main.dataset.chatId = "group-work"; main.dataset.chatType = "group"; title.textContent = "Product discussion";
+    list.replaceChildren();
+    const groupMessage = (id, author, message) => {
+      const row = document.createElement("div"); row.dataset.tid = "chat-pane-message"; row.dataset.messageId = id; row.dataset.authorName = author;
+      const body = document.createElement("p"); body.dataset.tid = "message-body"; body.textContent = message; row.append(body); list.append(row); list.scrollTop = list.scrollHeight; return row;
+    };
+    for (let i = 0; i < 60; i++) groupMessage(`group-${i}`, ["Me", "Kajal", "Tazeen"][i % 3], `product discussion ${i}`);
+    await click("select");
+    check("group selection exposes the last fifty messages and distinct participants", () => {
+      const snap = TeamsReplyAdapter.snapshot(testState.config);
+      assert(snap.isGroup && snap.messages.length === 50 && snap.messages[0].id === "group-10", "Group context was not fifty messages");
+      assert(new Set(snap.messages.map(m => m.author)).size === 3, "Group speakers merged");
+    });
+    const groupSends = testState.sendCount;
+    await click("preview");
+    check("manual group preview sends fifty named turns to inference without posting", () => {
+      const payload = testState.requests.filter(m => m.type === "generate").at(-1);
+      assert(payload.isGroup && payload.messages.length === 50 && payload.messages.at(-1).author === "Tazeen", "Group inference lost turns or names");
+      assert($("draft").value === "Sounds good!" && testState.sendCount === groupSends, "Group preview posted automatically");
+    });
+    await click("send"); await tick();
+    check("a reviewed group draft can be sent explicitly", () => assert(testState.sendCount === groupSends + 1 && !$("draft").value, "Reviewed group draft was not sent"));
+    $("scope").value = "selected"; $("mode").value = "auto"; await click("start");
+    groupMessage("group-addressed", "Kajal", "Chuckles, suggest the next fix"); await tick(); testState.now += 1100; await tick();
+    check("selected-group monitoring creates drafts while direct-chat mode stays automatic", () => {
+      assert(testState.sendCount === groupSends + 1 && $("draft").value === "Sounds good!", "Group monitoring posted an unreviewed draft");
+      assert(testState.requests.filter(m => m.type === "attempted").at(-1).isGroup, "Group attempt check omitted its conversation type");
+    });
+    const groupAuthor = list.lastElementChild.dataset.authorName; list.lastElementChild.dataset.authorName = "Tazeen";
+    await click("send");
+    check("sender changes make existing group drafts stale", () => assert(testState.sendCount === groupSends + 1 && $("status").textContent.includes("stale"), "Changed group sender received a stale reply"));
+    list.lastElementChild.dataset.authorName = groupAuthor;
+    await click("pause"); await click("dismiss");
+    main.removeAttribute("data-chat-id"); await click("select"); await click("start");
+    groupMessage("group-no-id", "Tazeen", "Can you summarize this?"); await tick(); testState.now += 1100; await tick();
+    check("groups without stable IDs can prepare drafts but cannot send automatically", () => {
+      assert($("draft").value === "Sounds good!" && testState.sendCount === groupSends + 1, "Title-bound group draft failed");
+    });
+    await click("pause"); await click("send");
+    check("sending a group draft still requires a stable conversation ID", () => assert(testState.sendCount === groupSends + 1 && $("status").textContent.includes("stable conversation identity"), "A title-bound group draft was sent"));
+    await click("dismiss");
+    main.dataset.chatType = "channel";
+    check("channels remain excluded", () => fail(() => TeamsReplyAdapter.snapshot(testState.config), /channels are not supported/));
+    main.removeAttribute("data-chat-type");
     document.getElementById("test-result").textContent = `PASS (${checked.length} browser checks)\n${checked.join("\n")}`;
     document.documentElement.dataset.testResult = "pass";
   } catch (error) {

@@ -19,14 +19,14 @@
     </fieldset>
     <fieldset><legend>Reply preferences</legend>
       <div class="grid">
-        <label>Recent messages (5–20)<input name="windowSize" type="number" min="5" max="20" required></label>
-        <label>Context character budget<input name="maxContextChars" type="number" min="1000" max="12000" step="100" required></label>
+        <label>Recent direct-chat messages (5–50)<input name="windowSize" type="number" min="5" max="50" required></label>
+        <label>Direct-chat context character budget<input name="maxContextChars" type="number" min="1000" max="48000" step="100" required></label>
         <label>Wait for consecutive messages (ms)<input name="debounceMs" type="number" min="1000" max="15000" step="500" required></label>
         <label>Image understanding<select name="vision"><option value="auto">Detect automatically (Ollama)</option><option value="on">Enabled — vision model</option><option value="off">Captions only</option></select></label>
       </div>
-      <p class="hint">Chuckles replies as your AI sidekick, calls you “my hooman,” and tells recipients you are busy. The introduction follows the recipient’s English, Bangla, or Banglish. Replies match their wording and may include relevant emojis. Adjust the humor and add your known facts below.</p>
+      <p class="hint">Chuckles answers questions, drafts messages, summarizes, and suggests fixes using the conversation. Replies match English, Bangla, or Banglish and may include relevant emojis. It skips repeated introductions and mentions you only when relevant. Adjust the humor and add your known facts below.</p>
       <label>Chuckles' style and your known facts<textarea name="style" rows="4" maxlength="1500" placeholder="Playful and warm. Keep jokes relevant and replies short."></textarea></label>
-      <p class="hint">Add facts you want the model to know. A 12,000-byte text prompt limit applies within a requested 16,384-token Ollama context. Images and GIF still frames need a vision model; otherwise the model receives their captions. OpenAI-compatible image understanding needs explicit Enabled mode. Long messages and preferences may be shortened.</p>
+      <p class="hint">Group chats always use up to 50 recent messages and a 48,000-character context budget. Text prompts are bounded to 32,000 bytes for direct chats and 64,000 bytes for groups. Ollama requests 32,768 context tokens; both providers allow 1,024 output tokens. Images and GIF still frames need a vision model; otherwise the model receives captions. Long messages and preferences may be shortened.</p>
     </fieldset>
     <details><summary>Teams selectors — adjust if your UI differs</summary>
       <p class="hint">Unread detection uses chatItem for sidebar entries and unread for unread indicators. Each chat must have one visible title and composer, readable message text, and stable message IDs. Authors can be siblings inside each message's own <code>chat-pane-item</code>. Automatic sending needs a chat ID from <code>data-chat-id</code>, <code>data-conversation-id</code>, <code>data-thread-id</code>, a Teams route containing <code>19:</code>, or exactly one immutable <code>participant-</code> key in the chat title. The identity selector must select the current chat only.</p>
@@ -36,6 +36,6 @@
     <div class="actions"><button type="submit">Save settings</button><button type="button" id="test" class="secondary">Save & test model</button></div>
   </form>
   <p id="status" role="status" aria-live="polite"></p>
-  <footer>After saving, open a direct chat in Teams, select it in the panel, inspect the sender labels, and press Start. Automatic send and All unread direct chats are the defaults. Start once to save monitoring across reloads; Pause turns it off. Generate &amp; send always sends; Preview reply creates a reviewable draft.</footer>
+  <footer>After saving, open a direct or group chat in Teams and select it in the panel. For groups, choose Selected chat only and Start to monitor new messages as drafts, or use Preview reply immediately. Send reply sends a reviewed draft. Automatic send and All unread direct chats are the defaults for direct chats. Start saves monitoring across reloads; Pause turns it off. Generate &amp; send explicitly generates and sends in the selected chat.</footer>
 </main><script src="core.js"></script><script src="options.js"></script></body>
 </html>

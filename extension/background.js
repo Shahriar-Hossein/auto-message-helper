@@ -27,7 +27,7 @@ async function ownership(sender, token, claim = false) {
   if (!mine && (!claim || owner?.expires > Date.now())) {
     throw new Error("Another Teams window is active, or this session expired. Pause it before starting here.");
   }
-  await chrome.storage.session.set({ owner: { tabId: sender.tab.id, documentId: sender.documentId, token, expires: Date.now() + 45000 } });
+  await chrome.storage.session.set({ owner: { tabId: sender.tab.id, documentId: sender.documentId, token, expires: Date.now() + 90000 } });
 }
 async function digest(value) {
   const bytes = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
@@ -35,7 +35,7 @@ async function digest(value) {
 }
 async function infer(config, messages) {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 25000);
+  const timeout = setTimeout(() => controller.abort(), 60000);
   try {
     let vision = config.vision === "on";
     if (config.vision === "auto" && config.provider === "ollama" && messages.some(m => m.media?.some(item => item.data))) {
@@ -69,11 +69,11 @@ async function infer(config, messages) {
     let reply = await fetchReply(payload);
     const language = Core.replyLanguage(messages);
     if (language.startsWith("Banglish")) {
-      const body = reply.slice(Core.introduction(language).length);
+      const body = reply;
       if (Core.replyLanguage([{ role: "other", text: body }]) !== language || /[\u0980-\u09ff]/.test(body)) {
         payload.messages[0].content += " STRICT LANGUAGE CHECK: The previous response used the wrong language. Write Bangla words in Latin letters (Banglish), matching the incoming wording. Do not use English sentences or Bangla script.";
         reply = await fetchReply(payload);
-        const corrected = reply.slice(Core.introduction(language).length);
+        const corrected = reply;
         if (Core.replyLanguage([{ role: "other", text: corrected }]) !== language || /[\u0980-\u09ff]/.test(corrected)) {
           throw new Error("The model kept replying in the wrong language. Try a model with stronger Banglish support; no message was sent.");
         }
@@ -81,7 +81,7 @@ async function infer(config, messages) {
     }
     return reply;
   } catch (error) {
-    if (error.name === "AbortError") throw new Error("Local model timed out after 25 seconds. Warm up the model, then retry manually.");
+    if (error.name === "AbortError") throw new Error("Local model timed out after 60 seconds. Warm up the model, then retry manually.");
     if (error instanceof TypeError) throw new Error("Cannot reach the local model. Check that the server is running and allows this extension's origin.");
     throw error;
   } finally { clearTimeout(timeout); }
@@ -100,15 +100,19 @@ async function handle(message, sender) {
     return {};
   }
   const { config: raw } = await chrome.storage.local.get("config");
-  const config = Core.settings(raw);
+  let config = Core.settings(raw);
   if (message.type === "test") {
     if (sender.tab) throw new Error("Test the model from settings.");
     return { reply: await infer(config, [{ role: "other", text: "Hi! Can you say hello in one short sentence?" }]) };
   }
   if (!["generate", "attempted"].includes(message.type) || !sender.tab) throw new Error("Unknown request.");
+  if (message.isGroup !== undefined && typeof message.isGroup !== "boolean") throw new Error("Invalid conversation type.");
+  config = Core.conversationConfig(config, message.isGroup === true);
   const messages = message.messages;
-  if (!Array.isArray(messages) || messages.length > 20 || messages.some(m =>
-    typeof m.id !== "string" || m.id.length > 300 || typeof m.text !== "string" || m.text.length > 12000 ||
+  if (!Array.isArray(messages) || messages.length > config.windowSize || messages.some(m =>
+    !m || typeof m.id !== "string" || m.id.length > 300 || typeof m.text !== "string" || m.text.length > config.maxContextChars ||
+    m.author !== undefined && (typeof m.author !== "string" || !Core.normalize(m.author) || m.author.length > 200) ||
+    config.isGroup && !m.author ||
     !["me", "other"].includes(m.role) || m.media !== undefined && (!Array.isArray(m.media) || m.media.length > 4 || m.media.some(item =>
       !item || !["image", "GIF", "attachment"].includes(item.kind) || typeof item.label !== "string" || item.label.length > 500 ||
       item.data !== undefined && (typeof item.data !== "string" || item.data.length > 200000 || !/^data:image\/jpeg;base64,[A-Za-z0-9+/]+=*$/.test(item.data))))) || messages.at(-1)?.role !== "other" ||
@@ -128,7 +132,7 @@ async function handle(message, sender) {
     if (ledger.includes(key) && message.manual !== true) throw new Error("This message was already attempted. Wait for a new message or generate manually.");
     // Reserve before inference. A failed or uncertain attempt is never silently retried.
     await chrome.storage.local.set({ ledger: [...ledger.slice(-499), key] });
-    await chrome.storage.session.set({ flight: { key, expires: Date.now() + 30000 } });
+    await chrome.storage.session.set({ flight: { key, expires: Date.now() + 65000 } });
   });
   try { return { reply: await infer(config, messages) }; }
   finally {
