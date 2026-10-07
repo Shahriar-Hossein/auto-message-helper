@@ -59,7 +59,7 @@ test("one Teams window owns the active controller", async () => {
 test("automatic duplicate attempts are blocked; an explicit manual draft can retry", async () => {
   const h = harness();
   await h.send({ type: "claim", token: "a" });
-  assert.equal((await h.send(h.payload)).reply, "Hello!");
+  assert.equal((await h.send(h.payload)).reply, "Chuckles here. Hello!");
   assert.equal((await h.send(h.payload)).ok, false);
   assert.equal(h.requests(), 1);
   assert.equal((await h.send({ ...h.payload, manual: true })).ok, true);
@@ -96,7 +96,7 @@ test("concurrent generations serialize reservation and allow only one fetch", as
   resolveFetch({ ok: true, json: async () => ({ message: { content: "Hello!" } }) });
   const result = await first;
   assert.equal(result.ok, true);
-  assert.equal(result.reply, "Hello!");
+  assert.equal(result.reply, "Chuckles here. Hello!");
   assert.equal(h.requests(), 1);
 });
 test("invalid or outgoing context never reaches the local API", async () => {
@@ -130,7 +130,7 @@ test("the worker sends actual recent messages as the model conversation", async 
   ];
   const result = await h.send({ ...h.payload, messages });
   assert.equal(result.ok, true);
-  assert.equal(result.reply, "Yes, send me the report.");
+  assert.equal(result.reply, "Chuckles here. Yes, send me the report.");
   assert.deepEqual(body.messages.slice(1), messages.map(m => ({ role: m.role === "me" ? "assistant" : "user", content: m.text })));
   assert.equal(body.messages.at(-1).content, messages.at(-1).text);
 });
@@ -190,7 +190,7 @@ test("wrong-language Banglish output is retried with strict guidance", async () 
   const result = await h.send({ ...h.payload, messages: [{ id: "banglish", role: "other", text: "ki korcho?" }] });
   assert.equal(result.ok, true); assert.equal(h.requests(), 2);
   assert.match(bodies[1].messages[0].content, /STRICT LANGUAGE CHECK/);
-  assert.equal(result.reply, "My hooman ekhon busy, bolo ki lagbe 😄");
+  assert.equal(result.reply, "Chuckles here. My hooman ekhon busy, bolo ki lagbe 😄");
 });
 test("persistent wrong-language output is rejected rather than sent", async () => {
   const h = harness(); await h.send({ type: "claim", token: "a" });
@@ -249,7 +249,7 @@ test("Banglish checks inspect the whole reply after removing legacy introduction
   await h.send({ type: "claim", token: "a" });
   const result = await h.send({ ...h.payload, messages: [{ id: "banglish", role: "other", text: "product er issue gula fix kori" }] });
   assert.equal(result.ok, true);
-  assert.equal(result.reply, "Bujhlam, age performance issue gula fix kori 😄");
+  assert.equal(result.reply, "Chuckles here. Bujhlam, age performance issue gula fix kori 😄");
   assert.equal(h.requests(), 1);
 });
 

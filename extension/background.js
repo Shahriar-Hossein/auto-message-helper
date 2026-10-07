@@ -64,7 +64,7 @@ async function infer(config, messages) {
         }
         throw new Error(`Local server returned HTTP ${response.status}. Check the URL, model ID, and server access settings.`);
       }
-      return Core.replyText(await response.json(), config.provider, messages);
+      return Core.replyText(await response.json(), config.provider, messages, config);
     };
     let reply = await fetchReply(payload);
     const language = Core.replyLanguage(messages);

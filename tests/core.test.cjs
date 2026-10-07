@@ -162,7 +162,7 @@ test("Chuckles speaks on behalf of the owner and receives the friend's rich joke
   assert.match(system, /Mention the owner only when relevant/);
   assert.match(system, /I means Chuckles, never the owner/);
   assert.match(system, /Do not invent facts, private knowledge, actions/);
-  assert.match(system, /Do not repeat an introduction/);
+  assert.match(system, /open with a short, casual self-identification/);
   assert.match(system, /Do useful work within the reply/);
   assert.match(system, /You have no tools to inspect computers/);
   assert.equal(request.messages.at(-1).role, "user");
@@ -355,4 +355,21 @@ test("previous default context budgets migrate once and current custom budgets s
   assert.equal(Core.settings({ contextVersion: 2, maxContextChars: 12000 }).maxContextChars, 24000);
   assert.equal(Core.settings({ maxContextChars: 6000 }).maxContextChars, 24000);
   assert.equal(Core.settings({ contextVersion: 3, maxContextChars: 12000 }).maxContextChars, 12000);
+});
+test("the persona names itself only when recent owner messages have not", () => {
+  const frost = Core.settings({ personality: "frost" });
+  const fresh = [{ role: "other", text: "Can you check this?" }];
+  const named = [{ role: "me", text: "Frost here. Sure." }, ...fresh];
+  const otherNamed = [{ role: "other", text: "Is Frost there?" }, ...fresh];
+  const reply = content => ({ message: { content } });
+  assert.match(Core.modelRequest(frost, fresh).messages[0].content, /"Frost here\."/);
+  assert.match(Core.modelRequest(frost, named).messages[0].content, /do not reintroduce yourself/);
+  assert.equal(Core.replyText(reply("On it."), "ollama", fresh, frost), "Frost here. On it.");
+  assert.equal(Core.replyText(reply("This is me, Frost. On it."), "ollama", fresh, frost), "This is me, Frost. On it.");
+  assert.equal(Core.replyText(reply("On it."), "ollama", named, frost), "On it.");
+  assert.equal(Core.replyText(reply("On it."), "ollama", otherNamed, frost), "Frost here. On it.");
+  // A name that has scrolled out of the read window no longer counts.
+  const old = [{ role: "me", text: "Frost here." }, ...Array.from({ length: 20 }, () => ({ role: "other", text: "hi" }))];
+  assert.equal(Core.introduced(frost, old), false);
+  assert.equal(Core.introduced(Core.conversationConfig(frost, true), old), true);
 });
