@@ -168,6 +168,26 @@ async function infer(config, messages) {
     clearTimeout(timeout);
   }
 }
+const IMAGE_HOSTS =
+  /^(.+\.)?(microsoft\.com|skype\.com|giphy\.com|tenor\.com|live\.com|office\.net|sharepoint\.com)$/i;
+async function fetchImage(url, sender) {
+  if (!sender.tab || typeof url !== "string") throw new Error("Bad request.");
+  const target = new URL(url);
+  if (target.protocol !== "https:" || !IMAGE_HOSTS.test(target.hostname))
+    throw new Error("Image host not allowed.");
+  const res = await fetch(url, {
+    credentials: "include",
+    signal: AbortSignal.timeout(8000),
+  });
+  const blob = await res.blob();
+  if (!res.ok || !blob.type.startsWith("image/") || blob.size > 8000000)
+    throw new Error("Image unavailable.");
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += 8192)
+    binary += String.fromCharCode(...bytes.subarray(i, i + 8192));
+  return { data: `data:${blob.type};base64,${btoa(binary)}` };
+}
 async function handle(message, sender) {
   trusted(sender);
   if (message.type === "settings") {
@@ -188,6 +208,7 @@ async function handle(message, sender) {
     });
     return {};
   }
+  if (message.type === "image") return fetchImage(message.url, sender);
   const { config: raw } = await chrome.storage.local.get("config");
   let config = Core.settings(raw);
   if (message.type === "test") {

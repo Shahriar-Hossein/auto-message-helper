@@ -234,7 +234,7 @@
     node.naturalWidth || node.videoWidth || node.clientWidth,
     node.naturalHeight || node.videoHeight || node.clientHeight,
   ];
-  const corsPixels = new Map();
+  const fetched = new Map();
   async function pixels(node) {
     const tag = node.tagName.toLowerCase();
     if (tag === "svg") {
@@ -273,18 +273,23 @@
     }
     const src = node.currentSrc || node.src || "";
     if (!/^https:/i.test(src)) return "";
-    // Reload the already-shown URL without cookies; GIF CDNs allow CORS reads.
-    if (!corsPixels.has(src)) {
-      if (corsPixels.size > 200)
-        corsPixels.delete(corsPixels.keys().next().value);
-      corsPixels.set(
+    // Tainted canvas: the worker fetches the bytes. Never re-request the URL
+    // from the page, a failed copy can end up in Teams' image cache.
+    if (!fetched.has(src)) {
+      if (fetched.size > 200) fetched.delete(fetched.keys().next().value);
+      fetched.set(
         src,
-        loadMedia(tag, src, true)
-          .then((copy) => toJpeg(copy, ...size(copy)))
+        chrome.runtime
+          .sendMessage({ type: "image", url: src })
+          .then(async (res) => {
+            if (!res?.ok) return "";
+            const copy = await loadMedia("img", res.data, false);
+            return toJpeg(copy, ...size(copy));
+          })
           .catch(() => ""),
       );
     }
-    return corsPixels.get(src);
+    return fetched.get(src);
   }
   async function captureMedia(snapshot, config) {
     let count = 0,

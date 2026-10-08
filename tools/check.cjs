@@ -56,6 +56,13 @@ assert.deepEqual(manifest.permissions, ["storage"]);
 assert.deepEqual(manifest.host_permissions, [
   "http://127.0.0.1/*",
   "http://localhost/*",
+  "https://*.microsoft.com/*",
+  "https://*.skype.com/*",
+  "https://*.live.com/*",
+  "https://*.office.net/*",
+  "https://*.sharepoint.com/*",
+  "https://*.giphy.com/*",
+  "https://*.tenor.com/*",
 ]);
 console.log(
   "Extension JavaScript syntax, manifest assets, and permission scope passed.",

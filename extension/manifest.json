@@ -1,11 +1,11 @@
 {
   "manifest_version": 3,
   "name": "Teams Local Replies",
-  "version": "0.2.13",
+  "version": "0.2.14",
   "description": "Local-model replies for unread Teams direct chats and selected groups, with Banglish and media context.",
   "minimum_chrome_version": "120",
   "permissions": ["storage"],
-  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*"],
+  "host_permissions": ["http://127.0.0.1/*", "http://localhost/*", "https://*.microsoft.com/*", "https://*.skype.com/*", "https://*.live.com/*", "https://*.office.net/*", "https://*.sharepoint.com/*", "https://*.giphy.com/*", "https://*.tenor.com/*"],
   "background": { "service_worker": "background.js" },
   "options_ui": { "page": "options.html", "open_in_tab": true },
   "action": { "default_title": "Configure Teams Local Replies" },
