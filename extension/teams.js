@@ -186,15 +186,21 @@
     return media.slice(0, 4);
   }
   function toJpeg(source, width, height) {
-    const canvas = document.createElement("canvas");
-    const scale = Math.min(1, 384 / Math.max(width, height));
-    canvas.width = Math.max(1, Math.round(width * scale));
-    canvas.height = Math.max(1, Math.round(height * scale));
-    const ctx = canvas.getContext("2d");
-    ctx.fillStyle = "white";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
-    return canvas.toDataURL("image/jpeg", 0.7); // Throws on a cross-origin (tainted) canvas.
+    // Shrink until the data URL fits the 200,000-char per-image cap.
+    let url = "";
+    for (const max of [768, 512, 384]) {
+      const canvas = document.createElement("canvas");
+      const scale = Math.min(1, max / Math.max(width, height));
+      canvas.width = Math.max(1, Math.round(width * scale));
+      canvas.height = Math.max(1, Math.round(height * scale));
+      const ctx = canvas.getContext("2d");
+      ctx.fillStyle = "white";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(source, 0, 0, canvas.width, canvas.height);
+      url = canvas.toDataURL("image/jpeg", 0.7); // Throws on a cross-origin (tainted) canvas.
+      if (url.length <= 200000) break;
+    }
+    return url;
   }
   function loadMedia(tag, src, cors) {
     const node = document.createElement(tag);
@@ -382,16 +388,6 @@
         80
     );
   }
-  function scrollEdge(scroller, latest) {
-    scroller.scrollTop = reverseScroller(scroller)
-      ? latest
-        ? 0
-        : -scroller.scrollHeight
-      : latest
-        ? scroller.scrollHeight
-        : 0;
-    scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
-  }
   function snapshot(config, limit) {
     if (!config.selfName)
       throw new Error("Set your exact Teams display name in Settings first.");
@@ -471,81 +467,17 @@
     };
   }
   const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-  async function latestViewport(config, scroller, identity, valid) {
-    let previous = "",
-      settled = 0,
-      latest;
-    for (let step = 0; step < 8 && valid(); step++) {
-      scrollEdge(scroller, true);
-      await delay(150);
-      if (!valid()) throw new Error("History loading was cancelled.");
-      latest = snapshot(config);
-      if (latest.identity !== identity)
-        throw new Error("The conversation changed while loading history.");
-      const last = latest.messages.at(-1);
-      const mark = JSON.stringify([last.id, last.role, last.author, last.text]);
-      settled = latest.atBottom && mark === previous ? settled + 1 : 0;
-      previous = mark;
-      if (settled >= 1) return latest;
-    }
-    if (!valid()) throw new Error("History loading was cancelled.");
-    if (latest?.atBottom) return latest;
-    throw new Error(
-      "Teams is still loading the latest messages. Try again when it finishes.",
-    );
-  }
   async function recentHistory(config, valid = () => true) {
-    let initial = snapshot(config);
+    // Read what Teams has loaded; never scroll, so images stay mounted.
+    const initial = snapshot(config);
     config = Core.conversationConfig(config, initial.isGroup);
-    const rows = all(config.selectors.row);
-    const scroller = scrollerFor(rows.at(-1), config);
-    if (scroller && !initial.atBottom)
-      initial = await latestViewport(config, scroller, initial.identity, valid);
     const collected = await captureMedia(initial, config);
-    const mergeOlder = (older) => {
-      const ids = new Set(collected.map((m) => m.id));
-      collected.unshift(...older.filter((m) => !ids.has(m.id)));
-    };
-    // Fetch virtualized history in bounded steps, then return to the latest turn.
-    try {
-      for (
-        let step = 0;
-        collected.length < config.windowSize && step < 8 && scroller;
-        step++
-      ) {
-        if (!valid()) throw new Error("History loading was cancelled.");
-        const previous = collected.length;
-        scrollEdge(scroller, false);
-        await delay(250);
-        const older = snapshot(config, config.windowSize);
-        if (older.identity !== initial.identity)
-          throw new Error("The conversation changed while loading history.");
-        mergeOlder(await captureMedia(older, config));
-        if (collected.length === previous && step >= 2) break;
-      }
-    } finally {
-      // Never scroll a different conversation after navigation or user intervention.
-      if (
-        valid() &&
-        scroller?.isConnected &&
-        snapshot(config).identity === initial.identity
-      ) {
-        await latestViewport(config, scroller, initial.identity, valid);
-      }
-    }
     if (!valid()) throw new Error("History loading was cancelled.");
-    const latest = snapshot(config);
-    if (latest.identity !== initial.identity)
+    if (snapshot(config).identity !== initial.identity)
       throw new Error("The conversation changed while loading history.");
-    const fresh = await captureMedia(latest, config);
-    const ids = new Set(fresh.map((m) => m.id));
     let imageCount = 0,
       imageBytes = 0;
-    const context = [
-      ...collected.filter((m) => !ids.has(m.id)),
-      ...fresh,
-    ].slice(-config.windowSize);
-    // Bound the aggregate too: virtualized pages were captured separately.
+    const context = collected.slice(-config.windowSize);
     return context
       .reverse()
       .map((message) => ({

@@ -644,7 +644,6 @@
     main.dataset.chatId = "chat-a";
     title.dataset.tid = "chat-header-title";
     title.textContent = "Alice";
-    let historyPage = 0;
     function historyRows(start) {
       list.replaceChildren();
       for (let i = start; i < start + 5; i++) {
@@ -662,35 +661,25 @@
     }
     historyRows(35);
     list.scrollTop = list.scrollHeight;
-    const loadHistory = (event) => {
-      if (event.isTrusted) return;
-      if (list.scrollTop === 0 && historyPage < 3)
-        historyRows(30 - 5 * historyPage++);
-      else if (list.scrollTop > 0) historyRows(35);
+    let scrolled = false;
+    const onScroll = (event) => {
+      if (!event.isTrusted) scrolled = true;
     };
-    list.addEventListener("scroll", loadHistory);
+    list.addEventListener("scroll", onScroll);
     const virtualHistory = await TeamsReplyAdapter.recentHistory(
       testState.config,
     );
-    list.removeEventListener("scroll", loadHistory);
-    check(
-      "virtualized history loads twenty turns in order and restores the latest viewport",
-      () => {
-        assert(
-          virtualHistory.length === 20 &&
-            virtualHistory.every(
-              (message, index) => message.id === `virtual-${index + 20}`,
-            ),
-          "History pages were missing or out of order",
-        );
-        assert(
-          TeamsReplyAdapter.snapshot(testState.config).messages.at(-1).id ===
-            "virtual-39" &&
-            TeamsReplyAdapter.snapshot(testState.config).atBottom,
-          "Latest viewport was not restored",
-        );
-      },
-    );
+    list.removeEventListener("scroll", onScroll);
+    check("history uses only loaded messages and never scrolls", () => {
+      assert(
+        virtualHistory.length === 5 &&
+          virtualHistory.every(
+            (message, index) => message.id === `virtual-${index + 35}`,
+          ),
+        "Loaded messages were missing or out of order",
+      );
+      assert(!scrolled && list.scrollTop > 0, "History scrolled the chat");
+    });
     list.replaceChildren();
     for (let i = 0; i < 25; i++)
       incoming(`history-${i}`, `Earlier message ${i}`);
@@ -2039,15 +2028,13 @@
       ),
     );
     title.textContent = "Na khete pawa dev team";
-    let groupHistoryStart = 45;
     const groupHistoryRows = (start) => {
       list.replaceChildren();
       for (let i = start; i < start + 15; i++) {
         const row = document.createElement("div");
         row.dataset.tid = "chat-pane-message";
         row.dataset.messageId = `group-virtual-${i}`;
-        row.dataset.authorName =
-          start === 0 ? "Me" : ["Me", "Kajal", "Tazeen"][i % 3];
+        row.dataset.authorName = ["Me", "Kajal", "Tazeen"][i % 3];
         row.style.height = "60px";
         const body = document.createElement("p");
         body.dataset.tid = "message-body";
@@ -2056,22 +2043,19 @@
         list.append(row);
       }
     };
-    const loadGroupHistory = (event) => {
-      if (event.isTrusted) return;
-      if (list.scrollTop === 0) {
-        groupHistoryStart = Math.max(5, groupHistoryStart - 10);
-        groupHistoryRows(groupHistoryStart);
-      } else groupHistoryRows(45);
+    let groupScrolled = false;
+    const noScroll = (event) => {
+      if (!event.isTrusted) groupScrolled = true;
     };
-    groupHistoryRows(0);
-    list.scrollTop = 0;
-    list.addEventListener("scroll", loadGroupHistory);
+    groupHistoryRows(45);
+    list.scrollTop = list.scrollHeight;
+    list.addEventListener("scroll", noScroll);
     await click("select");
     await click("preview");
     await new Promise((resolve) => setTimeout(resolve, 800));
-    list.removeEventListener("scroll", loadGroupHistory);
+    list.removeEventListener("scroll", noScroll);
     check(
-      "group preview from an older viewport loads the latest fifty turns and restores the latest messages",
+      "group preview uses only the loaded messages and never scrolls",
       () => {
         const payload = testState.requests
           .filter((m) => m.type === "generate")
@@ -2079,18 +2063,14 @@
         assert(
           $("draft").value === "Sounds good!" &&
             payload.isGroup &&
-            payload.messages.length === 50,
-          `Scrolled group could not draft: ${$("status").textContent}`,
+            payload.messages.length === 15,
+          `Group could not draft: ${$("status").textContent}`,
         );
         assert(
-          payload.messages.every((m, i) => m.id === `group-virtual-${i + 10}`),
-          "Group draft used older messages or lost history order",
+          payload.messages.every((m, i) => m.id === `group-virtual-${i + 45}`),
+          "Group draft lost message order",
         );
-        assert(
-          TeamsReplyAdapter.snapshot(testState.config).atBottom &&
-            list.lastElementChild.dataset.messageId === "group-virtual-59",
-          "Group's latest viewport was not restored",
-        );
+        assert(!groupScrolled, "Group preview scrolled the chat");
       },
     );
     await click("dismiss");
