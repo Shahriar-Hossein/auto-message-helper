@@ -16,7 +16,10 @@
     ]
   },
   "formatter": {
-    "enabled": false
+    "enabled": true,
+    "indentStyle": "space",
+    "indentWidth": 2,
+    "lineWidth": 80
   },
   "assist": {
     "enabled": false
@@ -35,10 +38,7 @@
   },
   "overrides": [
     {
-      "includes": [
-        "extension/**/*.js",
-        "tests/**/*.js"
-      ],
+      "includes": ["extension/**/*.js", "tests/**/*.js"],
       "linter": {
         "rules": {
           "suspicious": {

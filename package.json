@@ -7,7 +7,9 @@
     "test": "node --test tests/*.test.cjs",
     "check": "node tools/check.cjs",
     "lint": "biome lint . --error-on-warnings",
-    "lint:fix": "biome lint . --write"
+    "lint:fix": "biome lint . --write",
+    "format": "biome format . --write",
+    "format:check": "biome format ."
   },
   "devDependencies": {
     "@biomejs/biome": "2.5.15"
