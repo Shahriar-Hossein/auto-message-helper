@@ -947,3 +947,17 @@ test("the persona names itself only when recent owner messages have not", () => 
     true,
   );
 });
+test("reply text drops echoed prompt labels", () => {
+  assert.equal(
+    Core.replyText(
+      {
+        message: {
+          content:
+            "[Sender: Shihab Ahmed]\n[Latest incoming message]\nBujhlam.",
+        },
+      },
+      "ollama",
+    ),
+    "Bujhlam.",
+  );
+});

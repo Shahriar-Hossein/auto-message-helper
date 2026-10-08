@@ -376,6 +376,13 @@
     if (typeof text !== "string")
       throw new Error("The server returned no text reply.");
     text = text.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+    // Models echo the prompt's bracketed labels from history; drop leading ones.
+    text = text
+      .replace(
+        /^(?:\[(?:Sender:[^\]]*|Unanswered incoming message|Latest incoming message)\]\s*)+/i,
+        "",
+      )
+      .trim();
     // Remove the old stock introductions if a model echoes them from history.
     for (const prefix of [
       ...LEGACY_INTROS,
