@@ -28,7 +28,7 @@ function harness(fetchImpl) {
 }
 test("saved personality changes reach subsequent model requests without restarting the worker", async () => {
   const bodies = [];
-  const h = harness(async (url, options) => {
+  const h = harness(async (_url, options) => {
     bodies.push(JSON.parse(options.body));
     return { ok: true, json: async () => ({ message: { content: "Happy to help." } }) };
   });

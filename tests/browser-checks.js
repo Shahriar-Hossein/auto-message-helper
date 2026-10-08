@@ -332,7 +332,7 @@
       });
       sidebar.append(item); return item;
     }
-    const bob = unreadChat("chat-b", "Bob"), carol = unreadChat("chat-c", "Carol");
+    unreadChat("chat-b", "Bob"); unreadChat("chat-c", "Carol");
     $("scope").value = "all"; $("mode").value = "auto";
     editor.textContent = "Preserve my unfinished message"; await click("start"); await tick();
     check("all-chat monitoring waits while the current composer contains a draft", () => {

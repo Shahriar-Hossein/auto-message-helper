@@ -130,12 +130,16 @@ Settings, monitoring preferences, and hashed attempt keys use local extension st
 
 ## Development
 
-Node 20+; no dependencies:
+Node 20+. Install the development tools before running checks:
 
 ```bash
+npm ci
+npm run lint
 npm run check
 npm test
 ```
+
+Linting uses Biome’s recommended rules, with function and string style rules disabled to preserve existing conventions. Classic browser scripts retain their explicit strict-mode directives. Run `npm run lint:fix` to apply safe lint fixes.
 
 Tests cover prompt bounds, endpoint restrictions, freshness, worker sender validation, window ownership, concurrent inference, duplicates, and failed attempts. With Chrome/Chromium installed, the suite also opens `tests/browser.html` in an isolated temporary headless profile to exercise DOM extraction and rich-text insertion. Set `TEAMS_TEST_BROWSER` to an absolute Chromium executable path if needed. Process-launch permission is required; the browser test skips only if no browser is installed. You can also open the fixture manually.
 
